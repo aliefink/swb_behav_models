@@ -26,7 +26,8 @@ import random
 
 ############### SWB GLMS ################
 
-def run_swb(df, subj_ids, n_regs, reg_list,intercept=True):
+def run_swb(df, subj_ids, n_regs, reg_list,lam_method,intercept=True):
+    #lam_method = 'exp' 'linear' 'none'
     #df = model data for all subjects
     #subj_ids = desired subj in df
     #n_regs = number of task variables in model (ex: ev,cr,rpe = 3 n_regs)
@@ -54,23 +55,24 @@ def run_swb(df, subj_ids, n_regs, reg_list,intercept=True):
         rss = []
 
         #start multiple initializations for betas and lambda - optimize each time and find best, arbitrarily picked n_regs for consistency
-        for n in range(n_regs):
+        for n in range(n_regs): #arbitrary repetition of optimization
+            
+            if intercept==True:
 
-            lambda_init = random.uniform(0, 1)
-            betas_init = np.random.random(size = (n_regs+1))
-            param_inits = np.hstack((lambda_init,betas_init))
-            n_beta_bounds = len(betas_init)
-            #lambda must be constrained at 0-1, then rest of params do not need to be constrained
-            lower = [0] 
-            upper = [1]
-            for b in range(n_beta_bounds):
-                lower.append(-100)
-                upper.append(100)
-            bounds = (lower,upper) #bounds must be in form ([all lower bounds],[all upper bounds])
-
+                lambda_init = random.uniform(0, 1)
+                betas_init = np.random.random(size = (n_regs+1))
+                param_inits = np.hstack((lambda_init,betas_init))
+                n_beta_bounds = len(betas_init)
+                #lambda must be constrained at 0-1, then rest of params do not need to be constrained
+                lower = [0] 
+                upper = [1]
+                for b in range(n_beta_bounds):
+                    lower.append(-100)
+                    upper.append(100)
+                bounds = (lower,upper) #bounds must be in form ([all lower bounds],[all upper bounds])
 
             
-            if intercept==False:
+            else: #if intercept set to false
                 lambda_init = random.uniform(0, 1) #don't randomly initialize - high medium low for each parameter 
                 betas_init = np.random.random(size = (n_regs))
                 param_inits = np.hstack((lambda_init,0,betas_init))
@@ -86,7 +88,7 @@ def run_swb(df, subj_ids, n_regs, reg_list,intercept=True):
                 
             res = least_squares(leastsq_swb, # objective function
                         (param_inits),
-                        args=(subj_df,n_regs,reg_list),
+                        args=(subj_df,n_regs,reg_list,lam_method),
                         bounds = bounds,
                         method='trf') # arguments
             
@@ -131,14 +133,23 @@ def run_swb(df, subj_ids, n_regs, reg_list,intercept=True):
     return mood_est_df, optim_resid_df, optim_inits_df, param_fits_df, aic_dict,bic1_dict,bic2_dict, rsq_dict
 
 
-
-#function to estimate residuals for parameter optimization
-def leastsq_swb(params,df,n_regs,reg_list):
+def leastsq_swb(params,df,n_regs,reg_list,lam_method):
     #params is list of lambda estimate + beta estimates 
-    lam = params[0]
-    ls = [1,lam,lam**2]
+    #lam method = 'exp','linear','none'
+
+
     betas = params[1:]
+    lam = params[0]
+
+    if lam_method == 'exp':
+        ls = [1,lam,lam**2] #exponential lambda 
+    elif lam_method == 'linear':
+        ls = [1,lam,lam*2] #linear lambda 
+    else: 
+        ls = [1,1,1] #none
+    
     param_eq = 0
+        
 
     for n in range(n_regs):
         #beta value (intercept is first index, so need +1)
@@ -169,8 +180,12 @@ def leastsq_swb(params,df,n_regs,reg_list):
     return mood_residuals
 
 
+
+
 #function to extract mood estimates from already optimized parameters 
-def fit_swb(df,subj_ids,params,n_regs,reg_list):
+
+def fit_swb(df,subj_ids,params,n_regs,reg_list,lam_method):
+    #lam method = 'exp','linear','none'
 
     mood_est_df = pd.DataFrame(columns = subj_ids)
     resid_df = pd.DataFrame(columns = subj_ids)
@@ -187,7 +202,14 @@ def fit_swb(df,subj_ids,params,n_regs,reg_list):
         lam = params[subj_id][0]
         betas = list(params[subj_id][1:])
         #params is list of lambda estimate + beta estimates 
-        ls = [1,lam,lam**2]
+        
+        if lam_method == 'exp':
+            ls = [1,lam,lam**2] #exponential lambda 
+        elif lam_method == 'linear':
+            ls = [1,lam,lam*2] #linear lambda 
+        else: 
+            ls = [1,1,1] #no lambda 
+        
         param_eq = 0
 
         for n in range(n_regs):
@@ -379,7 +401,7 @@ def run_base_pt(subj_df,risk_inits,loss_inits,temp_inits,bounds):
     for risk_guess in risk_inits:
             for loss_guess in loss_inits:
                 for temp_guess in temp_inits:
-                    #print(risk_guess,loss_guess,temp_guess)
+                    #log transform for input to optim - then untransform in negll eq 
             
                     # guesses for alpha, theta will change on each loop
                     init_guess = (risk_guess, loss_guess, temp_guess)
@@ -418,6 +440,7 @@ def run_base_pt(subj_df,risk_inits,loss_inits,temp_inits,bounds):
 
 def negll_base_pt(params, subj_df):
     risk_aversion, loss_aversion, inverse_temp = params
+    #if using log transform then 
 
     # init list of choice prob predictions
     choiceprob_list = []
@@ -427,11 +450,20 @@ def negll_base_pt(params, subj_df):
 
         # get relevant trial info
         trial_info = subj_df.iloc[trial]
-        high_bet = trial_info['high_bet']
-        low_bet = trial_info['low_bet']
-        safe_bet = trial_info['safe_bet']
-        trial_type = trial_info['type']
-        choice = trial_info['choice_pred']
+        high_bet = trial_info['HighBet']
+        low_bet = trial_info['LowBet']
+        safe_bet = trial_info['SafeBet']
+        trial_type = trial_info['TrialType']
+        choice = trial_info['GambleChoice']
+
+        
+        #for simulation df - should change simulation code to match behavior data
+        # trial_info = subj_df.iloc[trial]
+        # high_bet = trial_info['high_bet']
+        # low_bet = trial_info['low_bet']
+        # safe_bet = trial_info['safe_bet']
+        # trial_type = trial_info['type']
+        # choice = trial_info['choice_pred']
 
         # transform to high bet value to utility (gamble)
         if high_bet > 0: #mix or gain trials
@@ -461,12 +493,12 @@ def negll_base_pt(params, subj_df):
         p_gamble = np.exp(inverse_temp*util_gamble) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
         p_safe = np.exp(inverse_temp*util_safe) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
 
-        if np.isnan(p_gamble): #when utility is too large, probabilities cannot be estimated 
-            p_gamble = 0.99
-            p_safe = 0.01
-        if np.isnan(p_safe):
-            p_safe = 0.99
-            p_gamble = 0.01
+        # if np.isnan(p_gamble): #when utility is too large, probabilities cannot be estimated 
+        #     p_gamble = 0.99
+        #     p_safe = 0.01
+        # if np.isnan(p_safe):
+        #     p_safe = 0.99
+        #     p_gamble = 0.01
         
 
         # append probability of chosen options
@@ -507,11 +539,11 @@ def fit_base_pt(params, subj_df):
 
         # get relevant trial info
         trial_info = subj_df.iloc[trial]
-        high_bet = trial_info['High.Bet']
-        low_bet = trial_info['Low.Bet']
-        safe_bet = trial_info['Safe.Bet']
+        high_bet = trial_info['HighBet']
+        low_bet = trial_info['LowBet']
+        safe_bet = trial_info['SafeBet']
         trial_type = trial_info['TrialType']
-        choice = trial_info['Gamble.Choice']
+        choice = trial_info['GambleChoice']
         outcome = trial_info['Profit']
 
         # transform to high bet value to utility (gamble)
@@ -701,8 +733,8 @@ def simulate_base_pt(params,rep,trials):
             rep_list.append(rep)
 
 
-    data = {'rep':rep_list,'tr':tr,'type':trial_list,'choice_pred':choice_pred,'choice_prob':choice_prob,
-                       'util_gamble':util_g,'util_safe':util_s,'p_gamble':p_g,'p_safe':p_s,'safe_bet':safe,'high_bet':high,'low_bet':low}
+    data = {'rep':rep_list,'tr':tr,'TrialType':trial_list,'ChoicePred':choice_pred,'ChoiceProb':choice_prob,
+                       'util_gamble':util_g,'util_safe':util_s,'p_gamble':p_g,'p_safe':p_s,'SafeBet':safe,'HighBet':high,'LowBet':low}
     DF = pd.DataFrame(data)
     
     return DF
