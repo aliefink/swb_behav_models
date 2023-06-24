@@ -23,6 +23,7 @@ import random
     # param_init
     # simulation_norm_gamble_choices
     # simulation_util_norm_gamble_choices
+    # get_model_data_pt
 
 ############### SWB GLMS ################
 
@@ -987,6 +988,53 @@ def simulate_dual_risk_pt(params,rep,trials):
     return DF
 
 
+def param_init(n_values, n_iter, upper_bound, lower_bound, method, beta_shape=0):
+    #inputs:
+        #n_values: how many parameter values needed
+        #n_iter: how many rounds of initialization; if method = 'rand' will return dict with array n_iter x n_values; if method = 'mc_grid' will return dict with grid n_iter x n_iter for each param (n_values)
+        #upper_bound: max possible parameter value
+        #lower_bound: min possible parameter value
+        #beta_shape: [a,b] alpha and beta values for beta distribution
+        #method: rand, mc_grid
+
+    #outputs:
+        #param dict - dictionary of param_id: init values (number of values = n_values)
+
+    if method == 'rand':
+        param_array = np.zeros(shape=(n_iter,n_values))
+        for iter in range(n_iter):
+            for val in range(n_values):
+                if iter%2==0:
+                    param_array[iter,val] = random.uniform(lower_bound,lower_bound+1) #hacky way to bias random initialization to have more numbers between 0-1
+                if iter%2!=0:
+                    param_array[iter,val] = random.uniform(lower_bound,upper_bound)
+    
+    elif method == 'beta':
+        a = beta_shape[0]
+        b = beta_shape[1]
+        N = n_iter
+
+        param_array = (upper_bound - lower_bound) * np.random.beta(a, b, N) + lower_bound
+
+    
+    #elif method == 'mc_grid':
+        #to do - make large parameter grid for monte carlo method for paramter initialization
+        #arianna matlab code:             # %% Free param starting points
+            # free0 = cell(nM, 1); % nM is number of models #collection of all start points that you're about to generate
+
+            # for m = 1:nM #can do for bunch of models at once but doesn't need to be loop
+            #     numStartingPoints = 10000; % Number of starting points to sample using Monte Carlo method #40k here
+            #     free0{m} = zeros(numStartingPoints, nX); #empty matrix for params
+            #     for s = 1:numStartingPoints 
+            #         % Generate random starting point for free parameters
+            #         free0{m}(s, xIndex{m}) = rand(1, length(xIndex{m})); #this is where you generate random starting point - create array for starting points and then outside of this loop through it with model - arianna constrains later! 
+            #     end
+            # end
+    
+    
+    return param_array
+
+
 def simulation_norm_gamble_choices(df): #to-do input column names to make this robust to standard + util 
     
     #df is task data for a single subject
@@ -1147,48 +1195,132 @@ def simulation_util_norm_gamble_choices(df):
     return loss_dict, mix_dict, gain_dict
 
 
-def param_init(n_values, n_iter, upper_bound, lower_bound, method, beta_shape=0):
-    #inputs:
-        #n_values: how many parameter values needed
-        #n_iter: how many rounds of initialization; if method = 'rand' will return dict with array n_iter x n_values; if method = 'mc_grid' will return dict with grid n_iter x n_iter for each param (n_values)
-        #upper_bound: max possible parameter value
-        #lower_bound: min possible parameter value
-        #beta_shape: [a,b] alpha and beta values for beta distribution
-        #method: rand, mc_grid
 
-    #outputs:
-        #param dict - dictionary of param_id: init values (number of values = n_values)
 
-    if method == 'rand':
-        param_array = np.zeros(shape=(n_iter,n_values))
-        for iter in range(n_iter):
-            for val in range(n_values):
-                if iter%2==0:
-                    param_array[iter,val] = random.uniform(lower_bound,lower_bound+1) #hacky way to bias random initialization to have more numbers between 0-1
-                if iter%2!=0:
-                    param_array[iter,val] = random.uniform(lower_bound,upper_bound)
+def get_model_data_pt(subj_id,task_df,rate_df):
+    model_data_dict = {}
+
+    #get rating info
+    round = rate_df['Round'][max(loc for loc, val in enumerate(rate_df['Round']) if val == 1)+1:] #need index of last round 1 because some pts have multiple round 1 scores, start after last round 1 index
+    rate = rate_df['Rating'][max(loc for loc, val in enumerate(rate_df['Round']) if val == 1)+1:]
+    zscore_rate = rate_df['zscore_mood'][max(loc for loc, val in enumerate(rate_df['Round']) if val == 1)+1:]
+
+
+    cr1 = []
+    cr2 = []
+    cr3 = []
+    ev1 = []
+    ev2 = []
+    ev3 = []
+    rpe1 = []
+    rpe2 = []
+    rpe3 = []
+    tcpe1 = []
+    tcpe2 = []
+    tcpe3 = []
+    dcpe1 = []
+    dcpe2 = []
+    dcpe3 = []
+    treg1 = []
+    treg2 = []
+    treg3 = []
+    dreg1 = []
+    dreg2 = []
+    dreg3 = []
+    trel1 = []
+    trel2 = []
+    trel3 = []
+    drel1 = []
+    drel2 = []
+    drel3 = []
+    utilG1 = []
+    utilG2 = []
+    utilG3 = []
+    utilS1 = []
+    utilS2 = []
+    utilS3 = []
+
+    for r in round:
+        #index for task df
+        t3 = r-4 #t-3 trial 
+        t2 = r-3 #t-2 trial
+        t1 = r-2 #t-1 trial
+        
+        cr1.append(task_df['CR'][t1])
+        cr2.append(task_df['CR'][t1])
+        cr3.append(task_df['CR'][t3])
+        ev1.append(task_df['choiceEV'][t1])
+        ev2.append(task_df['choiceEV'][t2])
+        ev3.append(task_df['choiceEV'][t3])
+        rpe1.append(task_df['RPE'][t1])
+        rpe2.append(task_df['RPE'][t2])
+        rpe3.append(task_df['RPE'][t3])
+        tcpe1.append(task_df['totalCPE'][t1])
+        tcpe2.append(task_df['totalCPE'][t2])
+        tcpe3.append(task_df['totalCPE'][t3])
+        dcpe1.append(task_df['decisionCPE'][t1])
+        dcpe2.append(task_df['decisionCPE'][t2])
+        dcpe3.append(task_df['decisionCPE'][t3])
+        treg1.append(task_df['totalRegret'][t1])
+        treg2.append(task_df['totalRegret'][t2])
+        treg3.append(task_df['totalRegret'][t3])
+        dreg1.append(task_df['decisionRegret'][t1])
+        dreg2.append(task_df['decisionRegret'][t2])
+        dreg3.append(task_df['decisionRegret'][t3])
+        trel1.append(task_df['totalRelief'][t1])
+        trel2.append(task_df['totalRelief'][t2])
+        trel3.append(task_df['totalRelief'][t3])
+        drel1.append(task_df['decisionRelief'][t1])
+        drel2.append(task_df['decisionRelief'][t2])
+        drel3.append(task_df['decisionRelief'][t3])
+        utilG1.append(task_df['util_g'][t1])
+        utilG2.append(task_df['util_g'][t2])
+        utilG3.append(task_df['util_g'][t3])
+        utilS1.append(task_df['util_s'][t1])
+        utilS2.append(task_df['util_s'][t2])
+        utilS3.append(task_df['util_s'][t3])
+
     
-    elif method == 'beta':
-        a = beta_shape[0]
-        b = beta_shape[1]
-        N = n_iter
-
-        param_array = (upper_bound - lower_bound) * np.random.beta(a, b, N) + lower_bound
-
-    
-    #elif method == 'mc_grid':
-        #to do - make large parameter grid for monte carlo method for paramter initialization
-        #arianna matlab code:             # %% Free param starting points
-            # free0 = cell(nM, 1); % nM is number of models #collection of all start points that you're about to generate
-
-            # for m = 1:nM #can do for bunch of models at once but doesn't need to be loop
-            #     numStartingPoints = 10000; % Number of starting points to sample using Monte Carlo method #40k here
-            #     free0{m} = zeros(numStartingPoints, nX); #empty matrix for params
-            #     for s = 1:numStartingPoints 
-            #         % Generate random starting point for free parameters
-            #         free0{m}(s, xIndex{m}) = rand(1, length(xIndex{m})); #this is where you generate random starting point - create array for starting points and then outside of this loop through it with model - arianna constrains later! 
-            #     end
-            # end
     
     
-    return param_array
+    model_data_dict['subj_id'] = [subj_id]*50
+    model_data_dict['round'] = round
+    model_data_dict['rate'] = rate
+    model_data_dict['zscore_rate'] = zscore_rate
+    model_data_dict['cr(t-1)'] = cr1
+    model_data_dict['cr(t-2)'] = cr2
+    model_data_dict['cr(t-3)'] = cr3
+    model_data_dict['choice_ev(t-1)'] = ev1
+    model_data_dict['choice_ev(t-2)'] = ev2
+    model_data_dict['choice_ev(t-3)'] = ev3
+    model_data_dict['rpe(t-1)'] = rpe1
+    model_data_dict['rpe(t-2)'] = rpe2
+    model_data_dict['rpe(t-3)'] = rpe3
+    model_data_dict['totalcpe(t-1)'] = tcpe1
+    model_data_dict['totalcpe(t-2)'] = tcpe2
+    model_data_dict['totalcpe(t-3)'] = tcpe3
+    model_data_dict['decisioncpe(t-1)'] = dcpe1
+    model_data_dict['decisioncpe(t-2)'] = dcpe2
+    model_data_dict['decisioncpe(t-3)'] = dcpe3
+    model_data_dict['totalregret(t-1)'] = treg1
+    model_data_dict['totalregret(t-2)'] = treg2
+    model_data_dict['totalregret(t-3)'] = treg3
+    model_data_dict['decisionregret(t-1)'] = dreg1
+    model_data_dict['decisionregret(t-2)'] = dreg2
+    model_data_dict['decisionregret(t-3)'] = dreg3
+    model_data_dict['totalrelief(t-1)'] = trel1
+    model_data_dict['totalrelief(t-2)'] = trel2
+    model_data_dict['totalrelief(t-3)'] = trel3
+    model_data_dict['decisionrelief(t-1)'] = drel1
+    model_data_dict['decisionrelief(t-2)'] = drel2
+    model_data_dict['decisionrelief(t-3)'] = drel3
+    model_data_dict['util_g(t-1)'] = utilG1
+    model_data_dict['util_g(t-2)'] = utilG2
+    model_data_dict['util_g(t-3)'] = utilG3
+    model_data_dict['util_s(t-1)'] = utilS1
+    model_data_dict['util_s(t-2)'] = utilS2
+    model_data_dict['util_s(t-3)'] = utilS3
+
+    
+    
+    return model_data_dict
