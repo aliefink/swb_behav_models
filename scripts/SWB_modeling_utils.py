@@ -507,7 +507,7 @@ def negll_base_pt(params, subj_df):
         elif choice == 'safe':
             choiceprob_list.append(p_safe)
         else:
-            choiceprob_list.append(0)
+            choiceprob_list.append(0.001) #do not append 0!!! won't converge 
 
     # compute the neg LL of choice probabilities across the entire task
     negLL = -np.sum(np.log(choiceprob_list))
@@ -525,8 +525,10 @@ def fit_base_pt(params, subj_df):
 
     # init list of choice prob predictions
     tr = []
-    choice_prob = []
-    choice_pred = []
+    choices = []
+    choice_prob_list = []
+    choice_pred_list = []
+    choice_pred_prob_list = []
     util_g = []
     util_s = []
     p_g = []
@@ -574,12 +576,12 @@ def fit_base_pt(params, subj_df):
         p_gamble = np.exp(inverse_temp*util_gamble) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
         p_safe = np.exp(inverse_temp*util_safe) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
 
-        if np.isnan(p_gamble): #when utility is too large, probabilities cannot be estimated 
-            p_gamble = 0.99
-            p_safe = 0.01
-        if np.isnan(p_safe):
-            p_safe = 0.99
-            p_gamble = 0.01
+        # if np.isnan(p_gamble): #when utility is too large, probabilities cannot be estimated 
+        #     p_gamble = 0.99
+        #     p_safe = 0.01
+        # if np.isnan(p_safe):
+        #     p_safe = 0.99
+        #     p_gamble = 0.01
         
 
         #appending to utils df for later param analysis
@@ -592,31 +594,33 @@ def fit_base_pt(params, subj_df):
 
         #getting stochastic predictions of model 
         #choic_pred = random.choices(['gamble','safe'],weights=[p_gamble,p_safe])[0]
+        
         if p_gamble > p_safe:
             choice_pred = 'gamble'
         else:
             choice_pred = 'safe'
-        choice_pred.append(choice_pred)
+        choice_pred_list.append(choice_pred)
 
         if choice_pred == 'gamble':
-            choice_prob.append(p_gamble)
+            choice_pred_prob_list.append(p_gamble)
         else:
-            choice_prob.append(p_safe)
+            choice_pred_prob_list.append(p_safe)
 
 
 
         #getting model probabilities of actual choices
+        choices.append(choice)
         if choice == 'gamble':
-            choice_prob.append(p_gamble)
+            choice_prob_list.append(p_gamble)
         elif choice == 'safe':
-            choice_prob.append(p_safe)
+            choice_prob_list.append(p_safe)
         else:
-            choice_prob.append(0)
+            choice_prob_list.append(0.001)  #do not append 0!!! won't converge 
 
     
     
-    DF = pd.DataFrame(data = zip(tr, choice_pred, choice_prob, util_g, util_s, p_g, p_s),
-                          columns =['tr','choice_pred','choice_prob','util_gamble','util_safe','p_gamble','p_safe'])
+    DF = pd.DataFrame(data = zip(tr, choices, choice_prob_list, choice_pred_list, choice_pred_prob_list, util_g, util_s, p_g, p_s),
+                          columns =['tr','choice','choice_prob','choice_pred','choice_pred_prob','util_gamble','util_safe','p_gamble','p_safe'])
         
     return DF
 
@@ -852,7 +856,7 @@ def negll_dual_risk_pt(params, subj_df):
         elif choice == 'safe':
             choiceprob_list.append(p_safe)
         else:
-            choiceprob_list.append(0)
+            choiceprob_list.append(0.001)  #do not append 0!!! won't converge 
 
     # compute the neg LL of choice probabilities across the entire task
     negLL = -np.sum(np.log(choiceprob_list))
