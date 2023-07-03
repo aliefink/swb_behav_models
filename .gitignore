@@ -1,2 +1,11 @@
 
 .DS_Store
+data/.DS_Store
+*.pkl
+
+scripts/__pycache__/SWB_modeling_utils.cpython-311.pyc
+data/pt_model_input_data_06262023
+data/swb_base_pt_params_06262023.csv
+data/model_input_data_06192023
+data/model_input_data_06162023
+data/model_input_data_06192023
