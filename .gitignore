@@ -1,6 +1,5 @@
 
 .DS_Store
-data/.DS_Store
 *.pkl
 
 scripts/__pycache__/SWB_modeling_utils.cpython-311.pyc
