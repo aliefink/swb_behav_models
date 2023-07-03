@@ -532,6 +532,8 @@ def fit_base_pt(params, subj_df):
     choice_pred_prob_list = []
     util_g = []
     util_s = []
+    weighted_high = []
+    weighted_low = []
     p_g = []
     p_s = []
 
@@ -563,6 +565,8 @@ def fit_base_pt(params, subj_df):
             weighted_low_bet = 0 
         
         util_gamble = weighted_high_bet + weighted_low_bet
+        weighted_high.append(weighted_high_bet)
+        weighted_low.append(weighted_low_bet)
     
 
         # transform safe bet value to utility (safe)
@@ -620,8 +624,8 @@ def fit_base_pt(params, subj_df):
 
     
     
-    DF = pd.DataFrame(data = zip(tr, choices, choice_prob_list, choice_pred_list, choice_pred_prob_list, util_g, util_s, p_g, p_s),
-                          columns =['tr','choice','choice_prob','choice_pred','choice_pred_prob','util_gamble','util_safe','p_gamble','p_safe'])
+    DF = pd.DataFrame(data = zip(tr, choices, choice_prob_list, choice_pred_list, choice_pred_prob_list, util_g, util_s, weighted_high, weighted_low,p_g, p_s),
+                          columns =['tr','choice','choice_prob','choice_pred','choice_pred_prob','util_gamble','util_safe','weighted_high','weighted_low','p_gamble','p_safe'])
         
     return DF
 
@@ -1239,6 +1243,27 @@ def get_model_data_pt(subj_id,task_df,rate_df):
     utilS1 = []
     utilS2 = []
     utilS3 = []
+    utilrpe1 = []
+    utilrpe2 = []
+    utilrpe3 = []
+    utiltcpe1 = []
+    utiltcpe2 = []
+    utiltcpe3 = []
+    utildcpe1 = []
+    utildcpe2 = []
+    utildcpe3 = []
+    utiltregret1 = []
+    utiltregret2 = []
+    utiltregret3 = []
+    utildregret1 = []
+    utildregret2 = []
+    utildregret3 = []
+    utiltrelief1 = []
+    utiltrelief2 = []
+    utiltrelief3 = []
+    utildrelief1 = []
+    utildrelief2 = []
+    utildrelief3 = []
 
     for r in round:
         #index for task df
@@ -1247,7 +1272,7 @@ def get_model_data_pt(subj_id,task_df,rate_df):
         t1 = r-2 #t-1 trial
         
         cr1.append(task_df['CR'][t1])
-        cr2.append(task_df['CR'][t1])
+        cr2.append(task_df['CR'][t2])
         cr3.append(task_df['CR'][t3])
         ev1.append(task_df['choiceEV'][t1])
         ev2.append(task_df['choiceEV'][t2])
@@ -1279,6 +1304,27 @@ def get_model_data_pt(subj_id,task_df,rate_df):
         utilS1.append(task_df['util_s'][t1])
         utilS2.append(task_df['util_s'][t2])
         utilS3.append(task_df['util_s'][t3])
+        utilrpe1.append(task_df['util_rpe'][t1])
+        utilrpe2.append(task_df['util_rpe'][t2])
+        utilrpe3.append(task_df['util_rpe'][t3])        
+        utiltcpe1.append(task_df['util_tcpe'][t1])
+        utiltcpe2.append(task_df['util_tcpe'][t2])        
+        utiltcpe3.append(task_df['util_tcpe'][t3])
+        utildcpe1.append(task_df['util_dcpe'][t1])      
+        utildcpe2.append(task_df['util_dcpe'][t2])
+        utildcpe3.append(task_df['util_dcpe'][t3])
+        utiltregret1.append(task_df['util_tregret'][t1])
+        utiltregret2.append(task_df['util_tregret'][t2])       
+        utiltregret3.append(task_df['util_tregret'][t3])
+        utildregret1.append(task_df['util_dregret'][t1])
+        utildregret2.append(task_df['util_dregret'][t2])       
+        utildregret3.append(task_df['util_dregret'][t3])
+        utiltrelief1.append(task_df['util_trelief'][t1])       
+        utiltrelief2.append(task_df['util_trelief'][t2])
+        utiltrelief3.append(task_df['util_trelief'][t3])   
+        utildrelief1.append(task_df['util_drelief'][t1])
+        utildrelief2.append(task_df['util_drelief'][t2])     
+        utildrelief3.append(task_df['util_drelief'][t3])
 
     
     
@@ -1320,7 +1366,113 @@ def get_model_data_pt(subj_id,task_df,rate_df):
     model_data_dict['util_s(t-1)'] = utilS1
     model_data_dict['util_s(t-2)'] = utilS2
     model_data_dict['util_s(t-3)'] = utilS3
-
-    
+    model_data_dict['util_rpe(t-1)'] = utilrpe1
+    model_data_dict['util_rpe(t-2)'] = utilrpe2
+    model_data_dict['util_rpe(t-3)'] = utilrpe3
+    model_data_dict['util_tcpe(t-1)'] = utiltcpe1
+    model_data_dict['util_tcpe(t-2)'] = utiltcpe2
+    model_data_dict['util_tcpe(t-3)'] = utiltcpe3
+    model_data_dict['util_dcpe(t-1)'] = utildcpe1
+    model_data_dict['util_dcpe(t-2)'] = utildcpe2
+    model_data_dict['util_dcpe(t-3)'] = utildcpe3
+    model_data_dict['util_tregret(t-1)'] = utiltregret1
+    model_data_dict['util_tregret(t-2)'] = utiltregret2
+    model_data_dict['util_tregret(t-3)'] = utiltregret3
+    model_data_dict['util_dregret(t-1)'] = utildregret1
+    model_data_dict['util_dregret(t-2)'] = utildregret2
+    model_data_dict['util_dregret(t-3)'] = utildregret3
+    model_data_dict['util_trelief(t-1)'] = utiltrelief1
+    model_data_dict['util_trelief(t-2)'] = utiltrelief2
+    model_data_dict['util_trelief(t-3)'] = utiltrelief3
+    model_data_dict['util_drelief(t-1)'] = utildrelief1
+    model_data_dict['util_drelief(t-2)'] = utildrelief2
+    model_data_dict['util_drelief(t-3)'] = utildrelief3
     
     return model_data_dict
+
+def get_pt_utils(task):
+    #inputs:
+
+    util_rpe = []
+    util_tcpe = []
+    util_dcpe = []
+    util_tregret = []
+    util_dregret = []
+    util_trelief = []
+    util_drelief = []
+
+    for t in range(len(task)):
+        
+        if task['GambleChoice'][t]=='gamble':
+
+
+            if task['Outcome'][t]=='good':
+
+                util_rpe.append(task['weighted_high'][t]-task['util_g'][t]) #gamble good means won high bet 
+                util_tcpe.append(task['weighted_high'][t] - task['weighted_high'][t])
+                util_dcpe.append(task['weighted_high'][t] - task['util_s'][t])
+                util_tregret.append(0)
+                util_dregret.append(0)
+                util_trelief.append(task['weighted_high'][t] - task['weighted_low'][t]) #outcome - worst possible
+                util_drelief.append(task['weighted_high'][t] - task['util_s'][t]) #outcome - worse safe decision
+            elif task['Outcome'][t]=='bad':
+                util_rpe.append(task['weighted_low'][t]-task['util_g'][t])
+                util_tcpe.append(task['weighted_low'][t] - task['weighted_high'][t])
+                util_dcpe.append(task['weighted_low'][t] - task['util_s'][t])
+                util_tregret.append(task['weighted_low'][t] - task['weighted_high'][t]) #outcome - best possible
+                util_dregret.append(task['weighted_low'][t] - task['util_s'][t]) #outcome - better safe decision
+                util_trelief.append(0)
+                util_drelief.append(0)
+            else: #fail trials
+                util_rpe.append(0)
+                util_tcpe.append(0)
+                util_dcpe.append(0)
+                util_tregret.append(0)
+                util_dregret.append(0)
+                util_trelief.append(0)
+                util_drelief.append(0)
+        
+        elif task['GambleChoice'][t]=='safe':
+            util_rpe.append(0)
+            if task['Outcome'][t]=='good':
+                util_tcpe.append(task['util_s'][t] - task['weighted_low'][t])
+                util_dcpe.append(task['util_s'][t] - task['weighted_low'][t])
+                util_tregret.append(0)
+                util_dregret.append(0)
+                util_trelief.append(task['util_s'][t] - task['weighted_low'][t]) #outcome - worst possible
+                util_drelief.append(task['util_s'][t] - task['weighted_low'][t]) #no difference for safe trials
+            elif task['Outcome'][t]=='bad':
+                util_tcpe.append(task['util_s'][t] - task['weighted_high'][t])
+                util_dcpe.append(task['util_s'][t] - task['weighted_high'][t])
+                util_tregret.append(task['util_s'][t] - task['weighted_high'][t]) #outcome - best possible
+                util_dregret.append(task['util_s'][t] - task['weighted_high'][t]) #no difference for safe trials 
+                util_trelief.append(0)
+                util_drelief.append(0)
+            else: #fail trials
+                util_tcpe.append(0)
+                util_dcpe.append(0)
+                util_tregret.append(0)
+                util_dregret.append(0)
+                util_trelief.append(0)
+                util_drelief.append(0)
+        
+        else: #fail trials
+            util_rpe.append(0)
+            util_tcpe.append(0)
+            util_dcpe.append(0)
+            util_tregret.append(0)
+            util_dregret.append(0)
+            util_trelief.append(0)
+            util_drelief.append(0)
+
+
+    task['util_rpe'] = util_rpe
+    task['util_tcpe'] = util_tcpe
+    task['util_dcpe'] = util_dcpe 
+    task['util_tregret'] = util_tregret
+    task['util_dregret'] = util_dregret
+    task['util_trelief'] = util_trelief
+    task['util_drelief'] = util_drelief
+
+
+    return task
