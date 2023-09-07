@@ -1,0 +1,15 @@
+name: swb_behav_models
+channels:
+  - defaults
+dependencies:
+  - pillow
+  - matplotlib
+  - pandas
+  - seaborn
+  - scipy
+  - scikit-learn
+  - tqdm
+  - ipykernel
+  - openpyxl
+  - statsmodels
+  - statannot
