@@ -1390,7 +1390,7 @@ def get_model_data_pt(subj_id,task_df,rate_df):
     
     return model_data_dict
 
-def get_pt_utils(task):
+def get_pt_utils(task): #updated to be correct calculations
     #inputs:
 
     util_rpe = []
@@ -1409,7 +1409,7 @@ def get_pt_utils(task):
             if task['Outcome'][t]=='good':
 
                 util_rpe.append(task['weighted_high'][t]-task['util_g'][t]) #gamble good means won high bet 
-                util_tcpe.append(task['weighted_high'][t] - task['weighted_high'][t])
+                util_tcpe.append(task['weighted_high'][t] - task['weighted_low'][t]) #updated to be correct calculation
                 util_dcpe.append(task['weighted_high'][t] - task['util_s'][t])
                 util_tregret.append(0)
                 util_dregret.append(0)
