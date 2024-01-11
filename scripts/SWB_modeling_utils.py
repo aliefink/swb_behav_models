@@ -657,28 +657,34 @@ def simulate_base_pt(params,rep,trials):
 
     for rep in range(rep):
         types = ['mix','gain','loss']
-        trial_types = random.choices(types,k=trials)
+        # trial_types = random.choices(types,k=trials)
+        swb_trial_master = pd.read_csv('/Users/alexandrafink/Documents/GraduateSchool/SaezLab/SWB/swb_computational_modeling/swb_behav_models/scripts/swb_trial_master.csv')
+        task = swb_trial_master.sample(frac = 1)
 
         #loop through trials
-        for trial in range(trials):
-            type = trial_types[trial]
-            trial_list.append(type)
-            if type == 'mix':
-                safe_bet = 0
-                low_bet = round(random.uniform(-1.5,-0.3),2) 
-                high_bet = round(random.uniform(3.0,0.06),2) 
-            elif type == 'gain':
-                high_bet = round(random.uniform(0.34,3.0),2) 
-                safe_bet = round(random.uniform(0.2,0.6),2) #need to constrain to always be less than high bet!!!
-                while safe_bet >= high_bet:
-                    safe_bet = round(random.uniform(0.2,0.6),2) #need to constrain to always be less than high bet!!!
-                low_bet = 0
-            elif type == 'loss':
-                low_bet = round(random.uniform(-3.0,-0.34),2)
-                safe_bet = round(random.uniform(-0.2,-0.6),2)
-                while safe_bet <= low_bet:
-                    safe_bet = round(random.uniform(-0.2,-0.6),2) #need to constrain to always be greater than low bet!!!
-                high_bet = 0
+        for trial in range(len(task)):
+            type = task.TrialType.iloc[trial]
+            safe_bet = task.SafeBet.iloc[trial]
+            high_bet = task.HighBet.iloc[trial]
+            low_bet = task.LowBet.iloc[trial]
+            # type = trial_types[trial]
+            # trial_list.append(type)
+            # if type == 'mix':
+            #     safe_bet = 0
+            #     low_bet = round(random.uniform(-1.5,-0.3),2) 
+            #     high_bet = round(random.uniform(3.0,0.06),2) 
+            # elif type == 'gain':
+            #     high_bet = round(random.uniform(0.34,3.0),2) 
+            #     safe_bet = round(random.uniform(0.2,0.6),2) #need to constrain to always be less than high bet!!!
+            #     while safe_bet >= high_bet:
+            #         safe_bet = round(random.uniform(0.2,0.6),2) #need to constrain to always be less than high bet!!!
+            #     low_bet = 0
+            # elif type == 'loss':
+            #     low_bet = round(random.uniform(-3.0,-0.34),2)
+            #     safe_bet = round(random.uniform(-0.2,-0.6),2)
+            #     while safe_bet <= low_bet:
+            #         safe_bet = round(random.uniform(-0.2,-0.6),2) #need to constrain to always be greater than low bet!!!
+            #     high_bet = 0
             
             safe.append(safe_bet)
             high.append(high_bet)
