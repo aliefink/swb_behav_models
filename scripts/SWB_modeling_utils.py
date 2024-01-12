@@ -507,8 +507,7 @@ def negll_base_pt(params, subj_df):
             choiceprob_list.append(p_gamble)
         elif choice == 'safe':
             choiceprob_list.append(p_safe)
-        else:
-            choiceprob_list.append(0.001) #do not append 0!!! won't converge 
+
 
     # compute the neg LL of choice probabilities across the entire task
     negLL = -np.sum(np.log(choiceprob_list))
@@ -540,6 +539,7 @@ def fit_base_pt(params, subj_df):
 
     #loop through trials
     for trial in range(len(subj_df)):
+
         tr.append(trial)
 
         # get relevant trial info
@@ -598,12 +598,12 @@ def fit_base_pt(params, subj_df):
 
 
         #getting stochastic predictions of model 
-        #choic_pred = random.choices(['gamble','safe'],weights=[p_gamble,p_safe])[0]
+        choice_pred = random.choices(['gamble','safe'],weights=[p_gamble,p_safe])[0]
         
-        if p_gamble > p_safe:
-            choice_pred = 'gamble'
-        else:
-            choice_pred = 'safe'
+        # if p_gamble > p_safe:
+        #     choice_pred = 'gamble'
+        # else:
+        #     choice_pred = 'safe'
         choice_pred_list.append(choice_pred)
 
         if choice_pred == 'gamble':
@@ -619,13 +619,11 @@ def fit_base_pt(params, subj_df):
             choice_prob_list.append(p_gamble)
         elif choice == 'safe':
             choice_prob_list.append(p_safe)
-        else:
-            choice_prob_list.append(0.001)  #do not append 0!!! won't converge 
 
     
     
     DF = pd.DataFrame(data = zip(tr, choices, choice_prob_list, choice_pred_list, choice_pred_prob_list, util_g, util_s, weighted_high, weighted_low,p_g, p_s),
-                          columns =['tr','choice','choice_prob','choice_pred','choice_pred_prob','util_gamble','util_safe','weighted_high','weighted_low','p_gamble','p_safe'])
+                          columns =['tr','choice','ChoiceProb','ChoicePred','ChoicePredProb','util_gamble','util_safe','weighted_high','weighted_low','p_gamble','p_safe'])
         
     return DF
 
@@ -633,140 +631,106 @@ def fit_base_pt(params, subj_df):
 
 ### base prospect theory model as a simulator for parameter recovery
 
-def simulate_base_pt(params,rep,trials):
+def simulate_base_pt(params,trials):
     #inputs: 
     #params - risk, loss, temp
-    #rep - number of times to run simulation
     #trials - number of trials for simulation (for EMU SWB always 150)
     risk_aversion, loss_aversion, inverse_temp = params
 
     # init list of choice prob predictions
-    rep_list = []
     tr = []
     trial_list = []
     choice_prob = []
     choice_pred = []
     util_g = []
     util_s = []
+    choice_util = []
     p_g = []
     p_s = []
     safe = []
     high = []
     low = []
+
+    #load task code master df 
+    swb_trial_master = pd.read_csv('/sc/arion/projects/guLab/Alie/SWB/swb_behav_models/data/swb_trial_master.csv')
+
+    task = swb_trial_master.sample(frac = 1) #randomize task order 
+
+    #loop through trials
+    for trial in range(len(task)):
+
+        trial_type = task.TrialType.iloc[trial]
+        safe_bet = task.SafeBet.iloc[trial]
+        high_bet = task.HighBet.iloc[trial]
+        low_bet = task.LowBet.iloc[trial]
+        trial_list.append(trial_type)
+
+        safe.append(safe_bet)
+        high.append(high_bet)
+        low.append(low_bet)
+
+
+        # transform to high bet value to utility (gamble)
+        if high_bet > 0: #mix or gain trials
+            weighted_high_bet = 0.5 * ((high_bet)**risk_aversion)
+        else: #loss trials
+            weighted_high_bet = 0 # -0.5 * loss_aversion * (-high_bet)**risk_aversion - this is never the case so changed to zero 
+        
+        # transform to low bet value to utility (gamble)
+        if low_bet >= 0: #gain trials
+            weighted_low_bet = 0 #0.5 * (low_bet)**risk_aversion - this is never the case so changed to zero 
+        else: #loss and mix trials
+            weighted_low_bet = -0.5 * loss_aversion * ((-low_bet)**risk_aversion)
+        
+        util_gamble = weighted_high_bet + weighted_low_bet
     
 
-    for rep in range(rep):
-        types = ['mix','gain','loss']
-        # trial_types = random.choices(types,k=trials)
-        swb_trial_master = pd.read_csv('/Users/alexandrafink/Documents/GraduateSchool/SaezLab/SWB/swb_computational_modeling/swb_behav_models/scripts/swb_trial_master.csv')
-        task = swb_trial_master.sample(frac = 1)
-
-        #loop through trials
-        for trial in range(len(task)):
-            type = task.TrialType.iloc[trial]
-            safe_bet = task.SafeBet.iloc[trial]
-            high_bet = task.HighBet.iloc[trial]
-            low_bet = task.LowBet.iloc[trial]
-            # type = trial_types[trial]
-            # trial_list.append(type)
-            # if type == 'mix':
-            #     safe_bet = 0
-            #     low_bet = round(random.uniform(-1.5,-0.3),2) 
-            #     high_bet = round(random.uniform(3.0,0.06),2) 
-            # elif type == 'gain':
-            #     high_bet = round(random.uniform(0.34,3.0),2) 
-            #     safe_bet = round(random.uniform(0.2,0.6),2) #need to constrain to always be less than high bet!!!
-            #     while safe_bet >= high_bet:
-            #         safe_bet = round(random.uniform(0.2,0.6),2) #need to constrain to always be less than high bet!!!
-            #     low_bet = 0
-            # elif type == 'loss':
-            #     low_bet = round(random.uniform(-3.0,-0.34),2)
-            #     safe_bet = round(random.uniform(-0.2,-0.6),2)
-            #     while safe_bet <= low_bet:
-            #         safe_bet = round(random.uniform(-0.2,-0.6),2) #need to constrain to always be greater than low bet!!!
-            #     high_bet = 0
-            
-            safe.append(safe_bet)
-            high.append(high_bet)
-            low.append(low_bet)
-
-
-            # transform to high bet value to utility (gamble)
-            if high_bet > 0: #mix or gain trials
-                weighted_high_bet = 0.5 * ((high_bet)**risk_aversion)
-            else: #loss trials
-                weighted_high_bet = 0 # -0.5 * loss_aversion * (-high_bet)**risk_aversion - this is never the case so changed to zero 
-            
-            # transform to low bet value to utility (gamble)
-            if low_bet >= 0: #gain trials
-                weighted_low_bet = 0 #0.5 * (low_bet)**risk_aversion - this is never the case so changed to zero 
-            else: #loss and mix trials
-                weighted_low_bet = -0.5 * loss_aversion * ((-low_bet)**risk_aversion)
-            
-            util_gamble = weighted_high_bet + weighted_low_bet
+        # transform safe bet value to utility (safe)
+        if safe_bet >= 0: #gain or mix trials
+            util_safe = (safe_bet)**risk_aversion
+        else: #loss trials
+            util_safe = -loss_aversion * ((-safe_bet)**risk_aversion)
+        
+        # utility options for calculating EV - utils separate, ug - us to combine or Uchosen - Unchosen (will differ by participant) 
+        #inverse temp < 1 more exporatory, > 1 more exploitative
+        # convert EV to choice probabilities via softmax
+        p_gamble = np.exp(inverse_temp*util_gamble) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
+        p_safe = np.exp(inverse_temp*util_safe) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
         
 
-            # transform safe bet value to utility (safe)
-            if safe_bet >= 0: #gain or mix trials
-                util_safe = (safe_bet)**risk_aversion
-            else: #loss trials
-                util_safe = -loss_aversion * ((-safe_bet)**risk_aversion)
-            
-            # utility options for calculating EV - utils separate, ug - us to combine or Uchosen - Unchosen (will differ by participant) 
-            #inverse temp < 1 more exporatory, > 1 more exploitative
-            # convert EV to choice probabilities via softmax
-            p_gamble = np.exp(inverse_temp*util_gamble) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
-            p_safe = np.exp(inverse_temp*util_safe) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
+        util_g.append(util_gamble)
+        util_s.append(util_safe)
+        p_g.append(p_gamble)
+        p_s.append(p_safe)
 
-            if np.isnan(p_gamble): #if utility is too large, cannot run prob calculation bc denom too large
-                p_gamble = 0.99
-                p_safe = 0.01 #avoid absolute decisions
-            if np.isnan(p_safe):
-                p_safe = 0.99
-                p_gamble = 0.01 #avoid absolute decisions 
-            
+        choice = random.choices(['gamble','safe'],weights=[p_gamble,p_safe])[0]
+        choice_pred.append(choice)
 
-            util_g.append(util_gamble)
-            util_s.append(util_safe)
-            p_g.append(p_gamble)
-            p_s.append(p_safe)
+        if choice == 'gamble':
+            choice_prob.append(p_gamble)
+            choice_util.append(util_gamble)
+        else:
+            choice_prob.append(p_safe)
+            choice_util.append(util_safe)
 
-            #choice = random.choices(['gamble','safe'],weights=[p_gamble,p_safe])[0]
-            if p_gamble > p_safe:
-                choice = 'gamble'
-            else:
-                choice = 'safe'
-            choice_pred.append(choice)
-
-            if choice == 'gamble':
-                choice_prob.append(p_gamble)
-            else:
-                choice_prob.append(p_safe)
-
-            tr.append(trial)
-
-            rep_list.append(rep)
+        tr.append(trial)
 
 
-    data = {'rep':rep_list,'tr':tr,'TrialType':trial_list,'ChoicePred':choice_pred,'ChoiceProb':choice_prob,
+
+    data = {'tr':tr,'TrialType':trial_list,'ChoicePred':choice_pred,'ChoiceProb':choice_prob, 'ChoiceUtil':choice_util,
                        'util_gamble':util_g,'util_safe':util_s,'p_gamble':p_g,'p_safe':p_s,'SafeBet':safe,'HighBet':high,'LowBet':low}
     DF = pd.DataFrame(data)
     
     return DF
 
 
-
-
 ###### dual risk prospect theory model
-
-
 
 def run_dual_risk_pt(subj_df,risk_gain_inits,risk_loss_inits,loss_inits,temp_inits,bounds):
     # gradient descent to minimize neg LL
 
     subj_df = (subj_df)
     res_nll = np.inf
-
 
 
     # guess several different starting points for rho
@@ -854,20 +818,18 @@ def negll_dual_risk_pt(params, subj_df):
         p_safe = np.exp(inverse_temp*util_safe) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
         
 
-        if np.isnan(p_gamble): #if utility is too large, probabiities will come out nan and 0
-            p_gamble = 0.99
-            p_safe = 0.01
-        if np.isnan(p_safe):
-            p_safe = 0.99
-            p_gamble = 0.01
+        # if np.isnan(p_gamble): #if utility is too large, probabiities will come out nan and 0
+        #     p_gamble = 0.99
+        #     p_safe = 0.01
+        # if np.isnan(p_safe):
+        #     p_safe = 0.99
+        #     p_gamble = 0.01
 
         # append probability of chosen options
         if choice == 'gamble':
             choiceprob_list.append(p_gamble) 
         elif choice == 'safe':
             choiceprob_list.append(p_safe)
-        else:
-            choiceprob_list.append(0.001)  #do not append 0!!! won't converge 
 
     # compute the neg LL of choice probabilities across the entire task
     negLL = -np.sum(np.log(choiceprob_list))
@@ -958,12 +920,12 @@ def simulate_dual_risk_pt(params,rep,trials):
             p_safe = np.exp(inverse_temp*util_safe) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
             
 
-            if np.isnan(p_gamble):
-                p_gamble = 0.99
-                p_safe = 0.01
-            if np.isnan(p_safe):
-                p_safe = 0.99
-                p_gamble = 0.01
+            # if np.isnan(p_gamble):
+            #     p_gamble = 0.99
+            #     p_safe = 0.01
+            # if np.isnan(p_safe):
+            #     p_safe = 0.99
+            #     p_gamble = 0.01
 
             util_g.append(util_gamble)
             util_s.append(util_safe)
@@ -972,11 +934,8 @@ def simulate_dual_risk_pt(params,rep,trials):
 
 
 
-            #choice = random.choices(['gamble','safe'],weights=[p_gamble,p_safe])[0]
-            if p_gamble > p_safe:
-                choice = 'gamble'
-            else:
-                choice = 'safe'
+            choice = random.choices(['gamble','safe'],weights=[p_gamble,p_safe])[0]
+
             choice_pred.append(choice)
 
 
@@ -1048,16 +1007,16 @@ def param_init(n_values, n_iter, upper_bound, lower_bound, method, beta_shape=0)
 def simulation_norm_gamble_choices(df): #to-do input column names to make this robust to standard + util 
     
     #df is task data for a single subject
-    loss_df = df[df.type == 'loss']
-    mix_df = df[df.type == 'mix']
-    gain_df = df[df.type == 'gain']
+    loss_df = df[df.TrialType == 'loss']
+    mix_df = df[df.TrialType == 'mix']
+    gain_df = df[df.TrialType == 'gain']
 
     #loss
     loss_dict = {}
-    loss_norm = -((loss_df['low_bet'] + loss_df['high_bet'])/2)/loss_df['safe_bet']
+    loss_norm = -((loss_df['LowBet'] + loss_df['HighBet'])/2)/loss_df['SafeBet']
     loss_quant = np.quantile(loss_norm,q=(0,0.2,0.4,0.6,0.8,1),axis=0)
     loss_x_axis = [np.mean(loss_quant[i:i+2],dtype=np.float64) for i in range(5)]
-    loss_dec = loss_df['choice_pred'].replace(['gamble','safe'],[1,0])
+    loss_dec = loss_df['ChoicePred'].replace(['gamble','safe'],[1,0])
     loss_zip = list(zip(loss_norm,loss_dec))
     loss_dict['loss_norm_evs'] = np.array(loss_norm)
     loss_dict['loss_choices'] = np.array(loss_dec)
@@ -1076,10 +1035,10 @@ def simulation_norm_gamble_choices(df): #to-do input column names to make this r
     
     #mix
     mix_dict = {}
-    mix_norm = ((mix_df['low_bet'] + mix_df['high_bet'])/2) #can't divide by zero
+    mix_norm = ((mix_df['LowBet'] + mix_df['HighBet'])/2) #can't divide by zero
     mix_quant = np.quantile(mix_norm,q=(0,0.2,0.4,0.6,0.8,1),axis=0)
     mix_x_axis = [np.mean(mix_quant[i:i+2],dtype=np.float64) for i in range(5)]
-    mix_dec = mix_df['choice_pred'].replace(['gamble','safe'],[1,0])
+    mix_dec = mix_df['ChoicePred'].replace(['gamble','safe'],[1,0])
     mix_zip = list(zip(mix_norm,mix_dec))
     mix_dict['mix_norm_evs'] = np.array(mix_norm)
     mix_dict['mix_choices'] = np.array(mix_dec)
@@ -1099,10 +1058,10 @@ def simulation_norm_gamble_choices(df): #to-do input column names to make this r
     
     #gain
     gain_dict = {}
-    gain_norm = ((gain_df['low_bet'] + gain_df['high_bet'])/2)/gain_df['safe_bet']
+    gain_norm = ((gain_df['LowBet'] + gain_df['HighBet'])/2)/gain_df['SafeBet']
     gain_quant = np.quantile(gain_norm,q=(0,0.2,0.4,0.6,0.8,1),axis=0)
     gain_x_axis = [np.mean(gain_quant[i:i+2],dtype=np.float64) for i in range(5)]
-    gain_dec = gain_df['choice_pred'].replace(['gamble','safe'],[1,0])
+    gain_dec = gain_df['ChoicePred'].replace(['gamble','safe'],[1,0])
     gain_zip = list(zip(gain_norm,gain_dec))
     gain_dict['gain_norm_evs'] = np.array(gain_norm)
     gain_dict['gain_choices'] = np.array(gain_dec)
@@ -1125,9 +1084,9 @@ def simulation_norm_gamble_choices(df): #to-do input column names to make this r
 def simulation_util_norm_gamble_choices(df):
     
     #df is task data for a single subject
-    loss_df = df[df.type == 'loss']
-    mix_df = df[df.type == 'mix']
-    gain_df = df[df.type == 'gain']
+    loss_df = df[df.TrialType == 'loss']
+    mix_df = df[df.TrialType == 'mix']
+    gain_df = df[df.TrialType == 'gain']
 
     #loss
     loss_dict = {}
@@ -1136,7 +1095,7 @@ def simulation_util_norm_gamble_choices(df):
     loss_norm = -loss_df['util_gamble']/loss_df['util_safe'] #util_g/util_s
     loss_quant = np.quantile(loss_norm,q=(0,0.2,0.4,0.6,0.8,1),axis=0)
     loss_x_axis = [np.mean(loss_quant[i:i+2],dtype=np.float64) for i in range(5)]
-    loss_dec = loss_df['choice_pred'].replace(['gamble','safe'],[1,0])
+    loss_dec = loss_df['ChoicePred'].replace(['gamble','safe'],[1,0])
     loss_zip = list(zip(loss_norm,loss_dec))
     loss_dict['loss_norm_evs'] = np.array(loss_norm)
     loss_dict['loss_choices'] = np.array(loss_dec)
@@ -1160,7 +1119,7 @@ def simulation_util_norm_gamble_choices(df):
     mix_norm = mix_df['util_gamble'] #can't divide by zero, util gamble has weighted high and low bet already
     mix_quant = np.quantile(mix_norm,q=(0,0.2,0.4,0.6,0.8,1),axis=0)
     mix_x_axis = [np.mean(mix_quant[i:i+2],dtype=np.float64) for i in range(5)]
-    mix_dec = mix_df['choice_pred'].replace(['gamble','safe'],[1,0])
+    mix_dec = mix_df['ChoicePred'].replace(['gamble','safe'],[1,0])
     mix_zip = list(zip(mix_norm,mix_dec))
     mix_dict['mix_norm_evs'] = np.array(mix_norm)
     mix_dict['mix_choices'] = np.array(mix_dec)
@@ -1185,7 +1144,7 @@ def simulation_util_norm_gamble_choices(df):
     gain_norm = gain_df['util_gamble']/gain_df['util_safe'] #util_g/util_s
     gain_quant = np.quantile(gain_norm,q=(0,0.2,0.4,0.6,0.8,1),axis=0)
     gain_x_axis = [np.mean(gain_quant[i:i+2],dtype=np.float64) for i in range(5)]
-    gain_dec = gain_df['choice_pred'].replace(['gamble','safe'],[1,0])
+    gain_dec = gain_df['ChoicePred'].replace(['gamble','safe'],[1,0])
     gain_zip = list(zip(gain_norm,gain_dec))
     gain_dict['gain_norm_evs'] = np.array(gain_norm)
     gain_dict['gain_choices'] = np.array(gain_dec)
