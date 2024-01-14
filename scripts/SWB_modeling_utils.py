@@ -2,6 +2,7 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares, minimize
+from joblib import Parallel, delayed
 import random
 from sklearn.metrics import r2_score
 import random
@@ -12,9 +13,9 @@ import random
     # fit_swb
     # run_rss_swb
     # rss_swb
-    # run_base_pt
-    # negll_base_pt
     # fit_base_pt
+    # run_base_pt
+    # negll_base_pt_pyEM
     # simulate_base_pt
     # run_dual_risk_pt
     # negll_dual_risk_pt
@@ -385,10 +386,241 @@ def rss_swb(params,df,n_regs,reg_list):
 
 ############ prospect theory models ##############
 
+##### MLE parameter estimation for base prospect theory
+
+def fit_base_pt(params, subj_df, prior=None, output='mle'):
+
+    risk_aversion, loss_aversion, inverse_temp = params
+
+    if output == 'npl':
+        risk_aversion = norm2riskaversion(risk_aversion) #transform parameter from gaussian space back into native model space using parameter-specific sigmoid function
+        risk_aversion_bounds = [0.00001, 2] #set upper and lower bounds
+        if risk_aversion< min(risk_aversion_bounds) or risk_aversion> max(risk_aversion_bounds): #prevent estimation from parameter values outside of bounds 
+            return 10000000
+        
+        loss_aversion = norm2lossaversion(loss_aversion) #transform parameter from gaussian space back into native model space using parameter-specific sigmoid function
+        loss_aversion_bounds = [0.00001, 6] #set upper and lower bounds
+        if loss_aversion< min(loss_aversion_bounds) or loss_aversion> max(loss_aversion_bounds):  #prevent estimation from parameter values outside of bounds 
+            return 10000000
+        
+        inverse_temp = norm2invtmp(inverse_temp) #transform parameter from gaussian space back into native model space using parameter-specific sigmoid function
+        this_beta_bounds = [0.00001, 8]  #set upper and lower bounds
+        if inverse_temp < min(this_beta_bounds) or inverse_temp > max(this_beta_bounds):  #prevent estimation from parameter values outside of bounds 
+            return 10000000
+
+    #Initialize choice probability vector to calculate negative log likelihood
+        # actual subj choice info   
+    choice_list = []
+    choice_prob_list = []
+        # predicted subj choice info 
+    choice_pred_list = []
+    choice_pred_prob = []
+
+    #Initialize empty data vectors to return all relevant data if output = 'all'
+    tr          = []
+    trial_list  = []
+    util_g      = []
+    util_s      = []
+    choice_util = []
+    p_g         = []
+    p_s         = []
+    safe        = []
+    high        = []
+    low         = []
+    w_safe      = []
+    w_high      = []
+    w_low       = []
+    
+
+    for trial in range(len(subj_df)):
+
+        trial_info = subj_df.iloc[trial]
+        trial_type = trial_info['TrialType']
+        choice = trial_info['GambleChoice']
+        high_bet = trial_info['HighBet']
+        low_bet = trial_info['LowBet']
+        safe_bet = trial_info['SafeBet']
+
+
+        #store trial info 
+        choice_list.append(choice)
+        tr.append(trial)
+        trial_list.append(trial_type)
+        high.append(high_bet)
+        low.append(low_bet)
+        safe.append(safe_bet)
+
+        ##### Utility calculations #####
+
+        # transform to high bet value to utility (gamble)
+        if high_bet > 0: #mix or gain trials
+            weighted_high_bet = 0.5 * ((high_bet)**risk_aversion)
+        else: #loss trials
+            weighted_high_bet = 0 
+        
+        w_high.append(weighted_high_bet)
+
+        # transform to low bet value to utility (gamble)
+        if low_bet < 0: #loss and mix trials
+            weighted_low_bet = -0.5 * loss_aversion * ((-low_bet)**risk_aversion)
+            
+        else: #gain trials
+            weighted_low_bet = 0 
+        
+        w_low.append(weighted_low_bet)
+        
+        util_gamble = weighted_high_bet + weighted_low_bet
+        util_g.append(util_gamble)
+    
+
+        # transform safe bet value to utility (safe)
+        if safe_bet >= 0: #gain or mix trials
+            util_safe = (safe_bet)**risk_aversion
+        else: #loss trials
+            util_safe = -loss_aversion * ((-safe_bet)**risk_aversion)
+
+        w_safe.append(util_safe)
+        util_s.append(util_safe)
+
+
+        ##### Choice probability calculation #####
+
+        # convert EV to choice probabilities via softmax
+        p_gamble = np.exp(inverse_temp*util_gamble) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
+        p_safe = np.exp(inverse_temp*util_safe) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
+
+        # append probability of chosen options
+        if choice == 'gamble':
+            choice_prob_list.append(p_gamble)
+            choice_util.append(util_gamble)
+
+        elif choice == 'safe':
+            choice_prob_list.append(p_safe)
+            choice_util.append(p_safe)
+        
+        
+        #getting stochastic predictions of model 
+        choice_pred = random.choices(['gamble','safe'],weights=[p_gamble,p_safe])[0]
+        choice_pred_list.append(choice_pred)
+
+        if choice_pred == 'gamble':
+            choice_pred_prob.append(p_gamble)
+        else:
+            choice_pred_prob.append(p_safe)
 
 
 
-##### get optim parameters via optimization function 
+    # calculate negative log likelihood of choice probabilities 
+            
+    negll = -np.sum(np.log(choice_prob_list))
+    
+    if np.isnan(negll):
+        negll = np.inf
+    
+    # output for MLE optimization
+    if output == 'mle': 
+        return negll
+    
+    # output for fitting 
+    elif output == 'all': 
+        subj_dict = {'params'         : [risk_aversion, loss_aversion, inverse_temp],
+                     'tr'             : tr,
+                     'TrialType'      : trial_list,
+                     'GambleChoice'   : choice_list,
+                     'ChoiceProb'     : choice_prob_list,
+                     'ChoiceUtil'     : choice_util,
+                     'ChoicePred'     : choice_pred,
+                     'ChoicePredProb' : choice_pred_prob,
+                     'util_gamble'    : util_g,
+                     'util_safe'      : util_s, 
+                     'p_gamble'       : p_g,
+                     'p_safe'         : p_s,
+                     'HighBet'        : high,
+                     'LowBet'         : low,
+                     'SafeBet'        : safe,
+                     'WeightedHigh'   : w_high,
+                     'WeightedLow'    : w_low,
+                     'WeightedSafe'   : w_safe,
+                     'negll'          : negll,
+                     'BIC'            : len(params) * np.log(150) + 2*negll,
+                     'AIC'            : 2*len(params) + 2*negll}
+        return subj_dict
+    
+    # output for EM MAP optimization
+    elif output == 'npl':
+        if prior is not None:  # EM-fit: P(Choices | h) * P(h | O) should be maximised, therefore same as minimizing it with negative sign
+            fval = -(-negll + prior['logpdf'](params))
+
+            if any(prior['sigma'] == 0):
+                this_mu = prior['mu']
+                this_sigma = prior['sigma']
+                this_logprior = prior['logpdf'](params)
+                print(f'mu: {this_mu}')
+                print(f'sigma: {this_sigma}')
+                print(f'logpdf: {this_logprior}')
+                print(f'fval: {fval}')
+            
+            if np.isinf(fval): 
+                fval = 10000000
+            return fval
+        else: # NLL fit 
+            return negll
+    
+    
+##### MLE parameter estimation for base prospect theory
+
+def minimize_negll(func_obj, param_values, df, param_bounds):
+    # minimize negll via MLE via gradient descent
+
+    result = minimize(func_obj, 
+                      param_values, 
+                      df,
+                      bounds=param_bounds)
+    return result
+    
+
+
+def parallel_run_base_pt(min_fn, fit_fn,param_combo_guesses,param_bounds,subj_df,n_jobs=-2):
+    '''
+    Maximum likelihood estimation with parallel processing 
+
+    Inputs:
+        - min_fn: minimization function 
+        - fit_fn: model fitting function (should return negll only)
+        - param_combo_guesses: grid of initial param values for parallel min_fn runs 
+        - param_bounds: min/max bounds for params in this format: (0,5),(0,5),(0,10)
+        - subj_df: pandas df of subj task data
+    
+    Returns:
+        - fit_dict: output of fit_fn
+
+    '''
+
+    
+    ##### Minimize negll via parallel mle
+
+    # Parallel fn :
+        # Basic syntax Parallel(n_jobs,verbose) ( delayed(optim_fn)(optim_fun inputs) loop for parallel fn inputs )
+        # requires Parallel & delayed from joblib
+        # n_jobs=-2 - num cpus used, -1 for all, -2 for all but one, +num for specific num
+        # verbose default is none, higher than 10 will give all
+        # delayed() = hold memory for function to run in parallel
+        # optim_fn = minimization fn
+        # ()() = inputs for optim_fn in delay - negll fn, params, data, bounds
+        # (()()____): iterations of initial param values 
+    
+    results = Parallel(n_jobs=n_jobs, verbose=5)(delayed(min_fn)(fit_fn, param_values, (subj_df), param_bounds) for param_values in param_combo_guesses)
+
+    # determine optimal parameter combination from negll
+    fit_dict = {}
+    best_result = min(results, key=lambda x: x.fun) # use lambda function to get negll from each run in results (lambda args: expression) 
+    param_fits = best_result.x
+    fit_dict['best_result'] = best_result
+    # run fit_fn with param_fits get best model fit info ### implement this with GLMs!
+    fit_dict['subj_dict'] = fit_fn(param_fits, subj_df, output='all')
+    
+    
+    return fit_dict
 
 def run_base_pt(subj_df,risk_inits,loss_inits,temp_inits,bounds):
     # gradient descent to minimize neg LL
@@ -437,34 +669,79 @@ def run_base_pt(subj_df,risk_inits,loss_inits,temp_inits,bounds):
     return risk_aversion, loss_aversion, inverse_temp, BIC, optim_vars
 
 
-#### get negll for optimization 
 
-def negll_base_pt(params, subj_df):
+##### EM MAP parameter estimation for base prospect theory
+
+#variable transformation functions
+def norm2lossaversion(aversion_param):
+    return 6 / (1 + np.exp(-aversion_param))
+def norm2riskaversion(aversion_param):
+    return 2 / (1 + np.exp(-aversion_param))
+def norm2invtmp(invtemp):
+    return 10 / (1 + np.exp(-invtemp))
+
+#negll calculation and fit fn (update MLE fns to have two output options!)
+def negll_base_pt_pyEM(params, subj_df,prior=None, output='npl'):
+
     risk_aversion, loss_aversion, inverse_temp = params
-    #if using log transform then 
+    
+    risk_aversion = norm2riskaversion(risk_aversion) #transform parameter from gaussian space back into native model space using parameter-specific sigmoid function
+    risk_aversion_bounds = [0.00001, 2] #set upper and lower bounds
+    if risk_aversion< min(risk_aversion_bounds) or risk_aversion> max(risk_aversion_bounds): #prevent estimation from parameter values outside of bounds 
+        return 10000000
+    
+    loss_aversion = norm2lossaversion(loss_aversion) #transform parameter from gaussian space back into native model space using parameter-specific sigmoid function
+    loss_aversion_bounds = [0.00001, 6] #set upper and lower bounds
+    if loss_aversion< min(loss_aversion_bounds) or loss_aversion> max(loss_aversion_bounds):  #prevent estimation from parameter values outside of bounds 
+        return 10000000
+    
+    inverse_temp = norm2invtmp(inverse_temp) #transform parameter from gaussian space back into native model space using parameter-specific sigmoid function
+    this_beta_bounds = [0.00001, 8]  #set upper and lower bounds
+    if inverse_temp < min(this_beta_bounds) or inverse_temp > max(this_beta_bounds):  #prevent estimation from parameter values outside of bounds 
+        return 10000000
 
-    # init list of choice prob predictions
-    choiceprob_list = []
+    #Initialize choice probability vector to calculate negative log likelihood
+        # actual subj choice info   
+    choice_list = []
+    choice_prob_list = []
+        # predicted subj choice info 
+    choice_pred_list = []
+    choice_pred_prob = []
 
-    #loop through trials
+    #Initialize empty data vectors to return all relevant data if output = 'all'
+    tr          = []
+    trial_list  = []
+    util_g      = []
+    util_s      = []
+    choice_util = []
+    p_g         = []
+    p_s         = []
+    safe        = []
+    high        = []
+    low         = []
+    w_safe      = []
+    w_high      = []
+    w_low       = []
+
     for trial in range(len(subj_df)):
 
-        # get relevant trial info
         trial_info = subj_df.iloc[trial]
+        trial_type = trial_info['TrialType']
+        choice = trial_info['GambleChoice']
         high_bet = trial_info['HighBet']
         low_bet = trial_info['LowBet']
         safe_bet = trial_info['SafeBet']
-        trial_type = trial_info['TrialType']
-        choice = trial_info['GambleChoice']
 
-        
-        #for simulation df - should change simulation code to match behavior data
-        # trial_info = subj_df.iloc[trial]
-        # high_bet = trial_info['high_bet']
-        # low_bet = trial_info['low_bet']
-        # safe_bet = trial_info['safe_bet']
-        # trial_type = trial_info['type']
-        # choice = trial_info['choice_pred']
+
+        #store trial info 
+        choice_list.append(choice)
+        tr.append(trial)
+        trial_list.append(trial_type)
+        high.append(high_bet)
+        low.append(low_bet)
+        safe.append(safe_bet)
+
+        ##### Utility calculations #####
 
         # transform to high bet value to utility (gamble)
         if high_bet > 0: #mix or gain trials
@@ -472,6 +749,8 @@ def negll_base_pt(params, subj_df):
         else: #loss trials
             weighted_high_bet = 0 
         
+        w_high.append(weighted_high_bet)
+
         # transform to low bet value to utility (gamble)
         if low_bet < 0: #loss and mix trials
             weighted_low_bet = -0.5 * loss_aversion * ((-low_bet)**risk_aversion)
@@ -479,7 +758,10 @@ def negll_base_pt(params, subj_df):
         else: #gain trials
             weighted_low_bet = 0 
         
+        w_low.append(weighted_low_bet)
+        
         util_gamble = weighted_high_bet + weighted_low_bet
+        util_g.append(util_gamble)
     
 
         # transform safe bet value to utility (safe)
@@ -488,146 +770,84 @@ def negll_base_pt(params, subj_df):
         else: #loss trials
             util_safe = -loss_aversion * ((-safe_bet)**risk_aversion)
 
+        w_safe.append(util_safe)
+        util_s.append(util_safe)
 
+
+        ##### Choice probability calculation #####
 
         # convert EV to choice probabilities via softmax
         p_gamble = np.exp(inverse_temp*util_gamble) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
         p_safe = np.exp(inverse_temp*util_safe) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
-
-        # if np.isnan(p_gamble): #when utility is too large, probabilities cannot be estimated 
-        #     p_gamble = 0.99
-        #     p_safe = 0.01
-        # if np.isnan(p_safe):
-        #     p_safe = 0.99
-        #     p_gamble = 0.01
-        
+        #p_safe = 1-p_gamble
 
         # append probability of chosen options
         if choice == 'gamble':
-            choiceprob_list.append(p_gamble)
+            choice_prob_list.append(p_gamble)
+            choice_util.append(util_gamble)
+
         elif choice == 'safe':
-            choiceprob_list.append(p_safe)
-
-
-    # compute the neg LL of choice probabilities across the entire task
-    negLL = -np.sum(np.log(choiceprob_list))
-    
-    if np.isnan(negLL):
-        return np.inf
-    else:
-        return negLL
-    
-
-##### fit base pt model to swb subj after finding optimal parameters 
-def fit_base_pt(params, subj_df):
-    #put in estimated optimal params from negll_prospect
-    risk_aversion, loss_aversion, inverse_temp = params
-
-    # init list of choice prob predictions
-    tr = []
-    choices = []
-    choice_prob_list = []
-    choice_pred_list = []
-    choice_pred_prob_list = []
-    util_g = []
-    util_s = []
-    weighted_high = []
-    weighted_low = []
-    p_g = []
-    p_s = []
-
-
-    #loop through trials
-    for trial in range(len(subj_df)):
-
-        tr.append(trial)
-
-        # get relevant trial info
-        trial_info = subj_df.iloc[trial]
-        high_bet = trial_info['HighBet']
-        low_bet = trial_info['LowBet']
-        safe_bet = trial_info['SafeBet']
-        trial_type = trial_info['TrialType']
-        choice = trial_info['GambleChoice']
-        outcome = trial_info['Profit']
-
-        # transform to high bet value to utility (gamble)
-        if high_bet > 0: #mix or gain trials
-            weighted_high_bet = 0.5 * ((high_bet)**risk_aversion)
-        else: #loss trials
-            weighted_high_bet = 0 
-        
-        # transform to low bet value to utility (gamble)
-        if low_bet < 0: #loss and mix trials
-            weighted_low_bet = -0.5 * (loss_aversion * (-low_bet)**risk_aversion)
-            
-        else: #gain trials
-            weighted_low_bet = 0 
-        
-        util_gamble = weighted_high_bet + weighted_low_bet
-        weighted_high.append(weighted_high_bet)
-        weighted_low.append(weighted_low_bet)
-    
-
-        # transform safe bet value to utility (safe)
-        if safe_bet >= 0: #gain or mix trials
-            util_safe = (safe_bet)**risk_aversion
-        else: #loss trials
-            util_safe = -loss_aversion * ((-safe_bet)**risk_aversion)
-
-
-
-        # convert EV to choice probabilities via softmax
-        p_gamble = np.exp(inverse_temp*util_gamble) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
-        p_safe = np.exp(inverse_temp*util_safe) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
-
-        # if np.isnan(p_gamble): #when utility is too large, probabilities cannot be estimated 
-        #     p_gamble = 0.99
-        #     p_safe = 0.01
-        # if np.isnan(p_safe):
-        #     p_safe = 0.99
-        #     p_gamble = 0.01
-        
-
-        #appending to utils df for later param analysis
-
-        util_g.append(util_gamble)
-        util_s.append(util_safe)
-        p_g.append(p_gamble)
-        p_s.append(p_safe)
-
-
+            choice_prob_list.append(p_safe)
+            choice_util.append(p_safe)
+                
         #getting stochastic predictions of model 
         choice_pred = random.choices(['gamble','safe'],weights=[p_gamble,p_safe])[0]
-        
-        # if p_gamble > p_safe:
-        #     choice_pred = 'gamble'
-        # else:
-        #     choice_pred = 'safe'
         choice_pred_list.append(choice_pred)
 
         if choice_pred == 'gamble':
-            choice_pred_prob_list.append(p_gamble)
+            choice_pred_prob.append(p_gamble)
         else:
-            choice_pred_prob_list.append(p_safe)
+            choice_pred_prob.append(p_safe)
 
-
-
-        #getting model probabilities of actual choices
-        choices.append(choice)
-        if choice == 'gamble':
-            choice_prob_list.append(p_gamble)
-        elif choice == 'safe':
-            choice_prob_list.append(p_safe)
-
+    # calculate negative log likelihood of choice probabilities 
+            
+    negll = -np.sum(np.log(choice_prob_list))
     
+    if np.isnan(negll):
+        negll = np.inf
     
-    DF = pd.DataFrame(data = zip(tr, choices, choice_prob_list, choice_pred_list, choice_pred_prob_list, util_g, util_s, weighted_high, weighted_low,p_g, p_s),
-                          columns =['tr','choice','ChoiceProb','ChoicePred','ChoicePredProb','util_gamble','util_safe','weighted_high','weighted_low','p_gamble','p_safe'])
+    if output == 'npl':
+        if prior is not None:  # EM-fit: P(Choices | h) * P(h | O) should be maximised, therefore same as minimizing it with negative sign
+            fval = -(-negll + prior['logpdf'](params))
+
+            if any(prior['sigma'] == 0):
+                this_mu = prior['mu']
+                this_sigma = prior['sigma']
+                this_logprior = prior['logpdf'](params)
+                print(f'mu: {this_mu}')
+                print(f'sigma: {this_sigma}')
+                print(f'logpdf: {this_logprior}')
+                print(f'fval: {fval}')
+            
+            if np.isinf(fval): 
+                fval = 10000000
+            return fval
+        else: # NLL fit 
+            return negll
         
-    return DF
-
-
+    elif output == 'all': 
+        subj_dict = {'params'         : [risk_aversion, loss_aversion, inverse_temp],
+                     'tr'             : tr,
+                     'TrialType'      : trial_list,
+                     'GambleChoice'   : choice_list,
+                     'ChoiceProb'     : choice_prob_list,
+                     'ChoiceUtil'     : choice_util,
+                     'ChoicePred'     : choice_pred,
+                     'ChoicePredProb' : choice_pred_prob,
+                     'util_gamble'    : util_g,
+                     'util_safe'      : util_s, 
+                     'p_gamble'       : p_g,
+                     'p_safe'         : p_s,
+                     'HighBet'        : high,
+                     'LowBet'         : low,
+                     'SafeBet'        : safe,
+                     'WeightedHigh'   : w_high,
+                     'WeightedLow'    : w_low,
+                     'WeightedSafe'   : w_safe,
+                     'negll'          : negll,
+                     'BIC'            : len(params) * np.log(150) + 2*negll}
+        
+        return subj_dict
 
 ### base prospect theory model as a simulator for parameter recovery
 
@@ -717,7 +937,7 @@ def simulate_base_pt(params,trials):
 
 
 
-    data = {'tr':tr,'TrialType':trial_list,'ChoicePred':choice_pred,'ChoiceProb':choice_prob, 'ChoiceUtil':choice_util,
+    data = {'tr':tr,'TrialType':trial_list,'GambleChoice':choice_pred,'ChoiceProb':choice_prob, 'ChoiceUtil':choice_util,
                        'util_gamble':util_g,'util_safe':util_s,'p_gamble':p_g,'p_safe':p_s,'SafeBet':safe,'HighBet':high,'LowBet':low}
     DF = pd.DataFrame(data)
     
