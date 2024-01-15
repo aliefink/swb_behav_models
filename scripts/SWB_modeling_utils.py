@@ -39,7 +39,7 @@ def fit_swb(params,df,n_regs,reg_list,lam_method='exp',output='rss'):
     elif lam_method == 'linear':
         ls = [1,lam,lam*2] #linear lambda 
     else: 
-        ls = [1,1,1] #none
+        ls = [1,1,1] #none MAKE SURE TO NOT COUNT THIS TOWARDS K IN BIC
         
     #initialize mood estimate equation     
     param_eq = 0
@@ -123,7 +123,7 @@ def min_rss_swb(subj_df, n_regs, reg_list, param_inits):
             best_result = result
     
     if rss_optim == np.inf:
-        print('No solution for ',subj_id)
+        print('No solution for this subject')
         return None
     
     else:
@@ -133,7 +133,7 @@ def min_rss_swb(subj_df, n_regs, reg_list, param_inits):
         fit_dict['best_result'] = best_result
         fit_dict['subj_dict']   = fit_swb(best_params,subj_df,n_regs,reg_list,output='all') #run fit function to get all outputs (better than 2 separate fns)
 
-    
+
     return fit_dict
 
 
