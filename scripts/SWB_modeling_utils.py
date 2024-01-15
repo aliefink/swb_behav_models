@@ -11,7 +11,11 @@ import random
     # fit_swb
     # min_rss_swb
     # fit_base_pt
-    # run_base_pt
+    # minimize_negll
+    # parallel_run_base_pt
+    # norm2riskaversion
+    # norm2lossaversion
+    # norm2invtmp
     # negll_base_pt_pyEM
     # simulate_base_pt
     # run_dual_risk_pt
@@ -21,32 +25,39 @@ import random
     # param_init
     # simulation_norm_gamble_choices
     # simulation_util_norm_gamble_choices
-    # get_model_data_pt
+    # get_pt_utils
     # get_glm_data_single_subj
     # get_glm_data_all_subj
+
+
 
 ############### SWB GLMS ################
 
 
 #fit swb glm function
+
 def fit_swb(params,df,n_regs,reg_list,lam_method='exp',output='rss'):
 
     #params is list of lambda estimate + beta estimates 
     betas = params[1:] # list of beta estimates - first index = intercept 
-    lam = params[0] #lamda estimate
+    lam = params[0] # lamda estimate
+    K = len(params) # num free params in optimization - used to calculate BIC
+
     if lam_method == 'exp':
         ls = [1,lam,lam**2] #exponential lambda 
     elif lam_method == 'linear':
         ls = [1,lam,lam*2] #linear lambda 
     else: 
-        ls = [1,1,1] #none MAKE SURE TO NOT COUNT THIS TOWARDS K IN BIC
+        betas = params # lam not being estimated - not in input params list 
+        lam = [1] #lamda
+        ls = [1,1,1] #none
+        K = K-1 #param count is -1 because lam is not being optimized
         
     #initialize mood estimate equation     
     param_eq = 0
 
     for n in range(n_regs):
-        #beta value (intercept is first index, so need +1)
-        b = betas[n+1] 
+        b = betas[n+1] # first beta value = intercept, so need +1 for weights
         l1 = ls[0] #t-1 decay
         l2 = ls[1] #t-2 decay
         l3 = ls[2] #t-3 decay
@@ -67,6 +78,7 @@ def fit_swb(params,df,n_regs,reg_list,lam_method='exp',output='rss'):
 
     # get the estimated mood rating from the parameter equation (plus intercept!)
     mood_est = [betas[0]]*len(df) + param_eq
+    # actual mood obs
     mood_obs = np.array(df['z_rate'])
     #compute the vector of residuals
     mood_residuals = mood_obs - mood_est
@@ -84,36 +96,47 @@ def fit_swb(params,df,n_regs,reg_list,lam_method='exp',output='rss'):
                      'mood_obs'   : mood_obs,
                      'mood_resid' : mood_residuals,
                      'rss'        : rss,
-                     'bic'        : len(params) * np.log(len(mood_residuals)) - 2*np.log((rss/len(mood_residuals))),
-                     'aic'        : 2*len(params) + n*np.log(rss/len(mood_residuals))
+                     'bic'        : K * np.log(len(mood_residuals)) - 2*np.log((rss/len(mood_residuals))),
+                     'aic'        : 2*K + n*np.log(rss/len(mood_residuals))
                      } #https://stats.stackexchange.com/questions/338501/calculating-the-aicc-and-bic-with-rss-instead-of-likelihood
 
         return subj_dict
 
 
 #### option to use minimize function to minimize rss instead of least_sq optimization 
-def min_rss_swb(subj_df, n_regs, reg_list, param_inits):
+
+
+def min_rss_swb(subj_df, n_regs, reg_list, param_inits,lam_method='exp'):
     
-    #model_df:     model data for subj 
-    #subj_id:      subj data for fitting
-    #n_regs:       number of task variables in model (ex: ev,cr,rpe = 3 n_regs)
-    #reg_list:     list of column names in df as str (should be len n_regs*3, 3 trials for each variable)
-    #param_inits:  list of initial parameter value combinations to iterate through - fn will run through optimization for each item in param_guesses
-                    #will be in form [(nparams)(nparams)]
+    # INPUTS:
+    # model_df:     model data for subj 
+    # subj_id:      subj data for fitting
+    # n_regs:       number of task variables in model (ex: ev,cr,rpe = 3 n_regs)
+    # reg_list:     list of column names in df as str (should be len n_regs*3, 3 trials for each variable)
+    # param_inits:  list of initial parameter value combinations to iterate through - fn will run through optimization for each item in param_guesses [(nparams)(nparams)]
+    # lam_method:   calculation of lam param ['exp','linear','none']
 
-    #initialize rss value to minimize 
-    rss_optim   = np.inf
+    #initialize best result & initial rss value to minimize 
     best_result = []
+    rss_optim   = np.inf
 
+    # calculate bounds for each param init 
     n_beta_bounds = n_regs+1
-    bounds = tuple([(0,1)]+[(-100,100)]*n_beta_bounds)
+    # remove lam from bounds if none 
+    if lam_method == 'none': #remove lam from estimation + bounds input
+        bounds = tuple([(-100,100)]*n_beta_bounds)
+    else: 
+        bounds = tuple([(0,1)]+[(-100,100)]*n_beta_bounds)
 
     for params in param_inits:
+
+        if lam_method == 'none': #remove lam from estimation + bounds input
+            params = params[1:]
 
         #run minimization for each param combo in param_inits
         result = minimize(fit_swb, # objective function
                     params,
-                    args=(subj_df,n_regs,reg_list), #reg_list should be in long form (3 str per n reg)
+                    args=(subj_df,n_regs,reg_list,lam_method), #reg_list should be in long form (3 str per n reg)
                     bounds=bounds) # arguments #method='L-BFGS-B'
         
         #extract rss from result output 
@@ -131,8 +154,7 @@ def min_rss_swb(subj_df, n_regs, reg_list, param_inits):
         #fit model with optim params
         fit_dict = {}
         fit_dict['best_result'] = best_result
-        fit_dict['subj_dict']   = fit_swb(best_params,subj_df,n_regs,reg_list,output='all') #run fit function to get all outputs (better than 2 separate fns)
-
+        fit_dict['subj_dict']   = fit_swb(best_params,subj_df,n_regs,reg_list,lam_method,output='all') #run fit function to get all outputs (better than 2 separate fns)
 
     return fit_dict
 
@@ -264,8 +286,6 @@ def fit_base_pt(params, subj_df, prior=None, output='mle'):
         else:
             choice_pred_prob.append(p_safe)
 
-
-
     # calculate negative log likelihood of choice probabilities 
             
     negll = -np.sum(np.log(choice_prob_list))
@@ -378,61 +398,14 @@ def parallel_run_base_pt(min_fn, fit_fn,param_combo_guesses,param_bounds,subj_df
     
     return fit_dict
 
-def run_base_pt(subj_df,risk_inits,loss_inits,temp_inits,bounds):
-    # gradient descent to minimize neg LL
-    # bounds in this format: (0,5),(0,5),(0,10)
-
-    subj_df = (subj_df)
-    res_nll = np.inf
-
-
-    # guess several different starting points for rho
-    for risk_guess in risk_inits:
-            for loss_guess in loss_inits:
-                for temp_guess in temp_inits:
-                    #log transform for input to optim - then untransform in negll eq 
-            
-                    # guesses for alpha, theta will change on each loop
-                    init_guess = (risk_guess, loss_guess, temp_guess)
-                    
-                    # minimize neg LL
-                    result = minimize(negll_base_pt, 
-                                    x0=init_guess, 
-                                    args=subj_df, 
-                                    method='L-BFGS-B',
-                                    bounds=bounds) #should match bounds given to param_init 
-                    
-                    # if current negLL is smaller than the last negLL,
-                    # then store current data
-                    if result.fun < res_nll:
-                        res_nll = result.fun
-                        param_fits = result.x
-                        risk_aversion, loss_aversion, inverse_temp = param_fits
-                        optim_vars = init_guess
-                    
-
-    if res_nll == np.inf:
-        print('No solution for this patient')
-        risk_aversion=0
-        loss_aversion=0
-        inverse_temp=0
-        BIC=0
-        optim_vars=0
-        #return risk_aversion, loss_aversion, inverse_temp, BIC, optim_vars
-    else:
-        BIC = len(init_guess) * np.log(len(subj_df)) + 2*res_nll
-    
-    return risk_aversion, loss_aversion, inverse_temp, BIC, optim_vars
-
-
 
 ##### EM MAP parameter estimation for base prospect theory
 
 #variable transformation functions
-def norm2lossaversion(aversion_param):
-    return 6 / (1 + np.exp(-aversion_param))
 def norm2riskaversion(aversion_param):
     return 2 / (1 + np.exp(-aversion_param))
+def norm2lossaversion(aversion_param):
+    return 6 / (1 + np.exp(-aversion_param))
 def norm2invtmp(invtemp):
     return 10 / (1 + np.exp(-invtemp))
 
@@ -802,11 +775,6 @@ def negll_dual_risk_pt(params, subj_df):
     else:
         return negLL
     
-
-# to- do def fit_dual_risk_pt
-    
-
-
 def simulate_dual_risk_pt(params,rep,trials):
     risk_aversion_gain, risk_aversion_loss, loss_aversion, inverse_temp = params
 
@@ -1126,197 +1094,6 @@ def simulation_util_norm_gamble_choices(df):
     
     return loss_dict, mix_dict, gain_dict
 
-
-
-
-def get_model_data_pt(subj_id,task_df,rate_df):
-    model_data_dict = {}
-
-    #get rating info
-    round = rate_df['Round'][max(loc for loc, val in enumerate(rate_df['Round']) if val == 1)+1:] #need index of last round 1 because some pts have multiple round 1 scores, start after last round 1 index
-    rate = rate_df['Rating'][max(loc for loc, val in enumerate(rate_df['Round']) if val == 1)+1:]
-    zscore_rate = rate_df['zscore_mood'][max(loc for loc, val in enumerate(rate_df['Round']) if val == 1)+1:]
-
-
-    cr1 = []
-    cr2 = []
-    cr3 = []
-    ev1 = []
-    ev2 = []
-    ev3 = []
-    rpe1 = []
-    rpe2 = []
-    rpe3 = []
-    tcpe1 = []
-    tcpe2 = []
-    tcpe3 = []
-    dcpe1 = []
-    dcpe2 = []
-    dcpe3 = []
-    treg1 = []
-    treg2 = []
-    treg3 = []
-    dreg1 = []
-    dreg2 = []
-    dreg3 = []
-    trel1 = []
-    trel2 = []
-    trel3 = []
-    drel1 = []
-    drel2 = []
-    drel3 = []
-    utilG1 = []
-    utilG2 = []
-    utilG3 = []
-    utilS1 = []
-    utilS2 = []
-    utilS3 = []
-    utilrpe1 = []
-    utilrpe2 = []
-    utilrpe3 = []
-    utiltcpe1 = []
-    utiltcpe2 = []
-    utiltcpe3 = []
-    utildcpe1 = []
-    utildcpe2 = []
-    utildcpe3 = []
-    utiltregret1 = []
-    utiltregret2 = []
-    utiltregret3 = []
-    utildregret1 = []
-    utildregret2 = []
-    utildregret3 = []
-    utiltrelief1 = []
-    utiltrelief2 = []
-    utiltrelief3 = []
-    utildrelief1 = []
-    utildrelief2 = []
-    utildrelief3 = []
-
-    for r in round:
-        #index for task df
-        t3 = r-4 #t-3 trial 
-        t2 = r-3 #t-2 trial
-        t1 = r-2 #t-1 trial
-        
-        cr1.append(task_df['CR'][t1])
-        cr2.append(task_df['CR'][t2])
-        cr3.append(task_df['CR'][t3])
-        ev1.append(task_df['choiceEV'][t1])
-        ev2.append(task_df['choiceEV'][t2])
-        ev3.append(task_df['choiceEV'][t3])
-        rpe1.append(task_df['RPE'][t1])
-        rpe2.append(task_df['RPE'][t2])
-        rpe3.append(task_df['RPE'][t3])
-        tcpe1.append(task_df['totalCPE'][t1])
-        tcpe2.append(task_df['totalCPE'][t2])
-        tcpe3.append(task_df['totalCPE'][t3])
-        dcpe1.append(task_df['decisionCPE'][t1])
-        dcpe2.append(task_df['decisionCPE'][t2])
-        dcpe3.append(task_df['decisionCPE'][t3])
-        treg1.append(task_df['totalRegret'][t1])
-        treg2.append(task_df['totalRegret'][t2])
-        treg3.append(task_df['totalRegret'][t3])
-        dreg1.append(task_df['decisionRegret'][t1])
-        dreg2.append(task_df['decisionRegret'][t2])
-        dreg3.append(task_df['decisionRegret'][t3])
-        trel1.append(task_df['totalRelief'][t1])
-        trel2.append(task_df['totalRelief'][t2])
-        trel3.append(task_df['totalRelief'][t3])
-        drel1.append(task_df['decisionRelief'][t1])
-        drel2.append(task_df['decisionRelief'][t2])
-        drel3.append(task_df['decisionRelief'][t3])
-        utilG1.append(task_df['util_g'][t1])
-        utilG2.append(task_df['util_g'][t2])
-        utilG3.append(task_df['util_g'][t3])
-        utilS1.append(task_df['util_s'][t1])
-        utilS2.append(task_df['util_s'][t2])
-        utilS3.append(task_df['util_s'][t3])
-        utilrpe1.append(task_df['util_rpe'][t1])
-        utilrpe2.append(task_df['util_rpe'][t2])
-        utilrpe3.append(task_df['util_rpe'][t3])        
-        utiltcpe1.append(task_df['util_tcpe'][t1])
-        utiltcpe2.append(task_df['util_tcpe'][t2])        
-        utiltcpe3.append(task_df['util_tcpe'][t3])
-        utildcpe1.append(task_df['util_dcpe'][t1])      
-        utildcpe2.append(task_df['util_dcpe'][t2])
-        utildcpe3.append(task_df['util_dcpe'][t3])
-        utiltregret1.append(task_df['util_tregret'][t1])
-        utiltregret2.append(task_df['util_tregret'][t2])       
-        utiltregret3.append(task_df['util_tregret'][t3])
-        utildregret1.append(task_df['util_dregret'][t1])
-        utildregret2.append(task_df['util_dregret'][t2])       
-        utildregret3.append(task_df['util_dregret'][t3])
-        utiltrelief1.append(task_df['util_trelief'][t1])       
-        utiltrelief2.append(task_df['util_trelief'][t2])
-        utiltrelief3.append(task_df['util_trelief'][t3])   
-        utildrelief1.append(task_df['util_drelief'][t1])
-        utildrelief2.append(task_df['util_drelief'][t2])     
-        utildrelief3.append(task_df['util_drelief'][t3])
-
-    
-    
-    
-    model_data_dict['subj_id'] = [subj_id]*50
-    model_data_dict['round'] = round
-    model_data_dict['rate'] = rate
-    model_data_dict['zscore_rate'] = zscore_rate
-    model_data_dict['cr(t-1)'] = cr1
-    model_data_dict['cr(t-2)'] = cr2
-    model_data_dict['cr(t-3)'] = cr3
-    model_data_dict['choice_ev(t-1)'] = ev1
-    model_data_dict['choice_ev(t-2)'] = ev2
-    model_data_dict['choice_ev(t-3)'] = ev3
-    model_data_dict['rpe(t-1)'] = rpe1
-    model_data_dict['rpe(t-2)'] = rpe2
-    model_data_dict['rpe(t-3)'] = rpe3
-    model_data_dict['totalcpe(t-1)'] = tcpe1
-    model_data_dict['totalcpe(t-2)'] = tcpe2
-    model_data_dict['totalcpe(t-3)'] = tcpe3
-    model_data_dict['decisioncpe(t-1)'] = dcpe1
-    model_data_dict['decisioncpe(t-2)'] = dcpe2
-    model_data_dict['decisioncpe(t-3)'] = dcpe3
-    model_data_dict['totalregret(t-1)'] = treg1
-    model_data_dict['totalregret(t-2)'] = treg2
-    model_data_dict['totalregret(t-3)'] = treg3
-    model_data_dict['decisionregret(t-1)'] = dreg1
-    model_data_dict['decisionregret(t-2)'] = dreg2
-    model_data_dict['decisionregret(t-3)'] = dreg3
-    model_data_dict['totalrelief(t-1)'] = trel1
-    model_data_dict['totalrelief(t-2)'] = trel2
-    model_data_dict['totalrelief(t-3)'] = trel3
-    model_data_dict['decisionrelief(t-1)'] = drel1
-    model_data_dict['decisionrelief(t-2)'] = drel2
-    model_data_dict['decisionrelief(t-3)'] = drel3
-    model_data_dict['util_g(t-1)'] = utilG1
-    model_data_dict['util_g(t-2)'] = utilG2
-    model_data_dict['util_g(t-3)'] = utilG3
-    model_data_dict['util_s(t-1)'] = utilS1
-    model_data_dict['util_s(t-2)'] = utilS2
-    model_data_dict['util_s(t-3)'] = utilS3
-    model_data_dict['util_rpe(t-1)'] = utilrpe1
-    model_data_dict['util_rpe(t-2)'] = utilrpe2
-    model_data_dict['util_rpe(t-3)'] = utilrpe3
-    model_data_dict['util_tcpe(t-1)'] = utiltcpe1
-    model_data_dict['util_tcpe(t-2)'] = utiltcpe2
-    model_data_dict['util_tcpe(t-3)'] = utiltcpe3
-    model_data_dict['util_dcpe(t-1)'] = utildcpe1
-    model_data_dict['util_dcpe(t-2)'] = utildcpe2
-    model_data_dict['util_dcpe(t-3)'] = utildcpe3
-    model_data_dict['util_tregret(t-1)'] = utiltregret1
-    model_data_dict['util_tregret(t-2)'] = utiltregret2
-    model_data_dict['util_tregret(t-3)'] = utiltregret3
-    model_data_dict['util_dregret(t-1)'] = utildregret1
-    model_data_dict['util_dregret(t-2)'] = utildregret2
-    model_data_dict['util_dregret(t-3)'] = utildregret3
-    model_data_dict['util_trelief(t-1)'] = utiltrelief1
-    model_data_dict['util_trelief(t-2)'] = utiltrelief2
-    model_data_dict['util_trelief(t-3)'] = utiltrelief3
-    model_data_dict['util_drelief(t-1)'] = utildrelief1
-    model_data_dict['util_drelief(t-2)'] = utildrelief2
-    model_data_dict['util_drelief(t-3)'] = utildrelief3
-    
-    return model_data_dict
 
 def get_pt_utils(task): #updated to be correct calculations
     #inputs:
