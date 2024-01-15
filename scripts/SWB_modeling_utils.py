@@ -8,11 +8,8 @@ from sklearn.metrics import r2_score
 import random
 
 #contains:
-    # run_swb
-    # leastsq_swb
     # fit_swb
-    # run_rss_swb
-    # rss_swb
+    # min_rss_swb
     # fit_base_pt
     # run_base_pt
     # negll_base_pt_pyEM
@@ -25,133 +22,27 @@ import random
     # simulation_norm_gamble_choices
     # simulation_util_norm_gamble_choices
     # get_model_data_pt
+    # get_glm_data_single_subj
+    # get_glm_data_all_subj
 
 ############### SWB GLMS ################
 
-def run_swb(df, subj_ids, n_regs, reg_list,lam_method,intercept=True):
-    #lam_method = 'exp' 'linear' 'none'
-    #df = model data for all subjects
-    #subj_ids = desired subj in df
-    #n_regs = number of task variables in model (ex: ev,cr,rpe = 3 n_regs)
-    #reg_list = list of column names in df as str (should be len n_regs*3, 3 trials for each variable)
 
-    mood_est_df = pd.DataFrame(columns = subj_ids)
-    optim_resid_df = pd.DataFrame(columns = subj_ids)
-    optim_inits_df = pd.DataFrame(columns = subj_ids)
-    param_fits_df = pd.DataFrame(columns = subj_ids)
-    aic_dict = {}
-    bic1_dict = {}
-    bic2_dict = {}
-    rsq_dict = {}
+#fit swb glm function
+def fit_swb(params,df,n_regs,reg_list,lam_method='exp',output='rss'):
 
-
-    for ix, subj_id in enumerate(subj_ids):
-
-        subj_df = df[df["subj_id"]==subj_id]
-
-        #set sse to np.inf to compare to optim result
-        res_cost = np.inf
-        param_fits = []
-        optim_vars = []
-        residuals = []
-        rss = []
-
-        #start multiple initializations for betas and lambda - optimize each time and find best, arbitrarily picked n_regs for consistency
-        for n in range(n_regs): #arbitrary repetition of optimization
-            
-            if intercept==True:
-
-                lambda_init = random.uniform(0, 1)
-                betas_init = np.random.random(size = (n_regs+1))
-                param_inits = np.hstack((lambda_init,betas_init))
-                n_beta_bounds = len(betas_init)
-                #lambda must be constrained at 0-1, then rest of params do not need to be constrained
-                lower = [0] 
-                upper = [1]
-                for b in range(n_beta_bounds):
-                    lower.append(-100)
-                    upper.append(100)
-                bounds = (lower,upper) #bounds must be in form ([all lower bounds],[all upper bounds])
-
-            
-            else: #if intercept set to false
-                lambda_init = random.uniform(0, 1) #don't randomly initialize - high medium low for each parameter 
-                betas_init = np.random.random(size = (n_regs))
-                param_inits = np.hstack((lambda_init,0,betas_init))
-                n_beta_bounds = len(betas_init)
-                #lambda must be constrained at 0-1, then rest of params do not need to be constrained
-                lower = [0] 
-                upper = [1]
-                for b in range(n_beta_bounds):
-                    lower.append(-100)
-                    upper.append(100)
-                bounds = (lower,upper) #bounds must be in form ([all lower bounds],[all upper bounds])
-
-                
-            res = least_squares(leastsq_swb, # objective function
-                        (param_inits),
-                        args=(subj_df,n_regs,reg_list,lam_method),
-                        bounds = bounds,
-                        method='trf') # arguments
-            
-            residuals = res.fun #residuals output from best model
-            cost = res.cost
-            if cost < res_cost: #goal > minimize cost function 
-                res_cost = cost
-                optim_vars = param_inits
-                param_fits = res.x
-                residuals = residuals 
-                rss = sum(residuals**2)
-
-        
-        if res_cost == np.inf:
-            print('No solution for ',subj_id)
-            mood_est = np.empty(shape=len(residuals))
-            optim_resid = np.empty(shape=len(residuals))
-            optim_vars = np.empty(shape=len(param_inits))
-            param_fits = np.empty(shape=len(param_inits))
-            AIC = 0
-            BIC1 = 0
-            BIC2 = 0
-            rsq = 0
-        else:
-            mood_est = np.array(subj_df.zscore_rate - residuals)
-            optim_resid = residuals
-            AIC = (2*len(param_inits)) + (len(residuals)*np.log(rss/len(residuals)))
-            BIC1 = (len(residuals) * np.log(rss/len(residuals))) + (len(param_inits)*np.log(len(residuals)))
-            BIC2 = (-2 * np.log(rss/len(residuals))) + (len(param_inits)*np.log(len(residuals)))
-            rsq = r2_score(np.array(subj_df.zscore_rate),mood_est)
-
-        mood_est_df[subj_id] = mood_est
-        optim_resid_df[subj_id] = optim_resid
-        optim_inits_df[subj_id] = optim_vars
-        param_fits_df[subj_id] = param_fits
-        aic_dict[subj_id] = AIC
-        bic1_dict[subj_id] = BIC1
-        bic2_dict[subj_id] = BIC2
-        rsq_dict[subj_id] = rsq
-    
-    
-    return mood_est_df, optim_resid_df, optim_inits_df, param_fits_df, aic_dict,bic1_dict,bic2_dict, rsq_dict
-
-
-def leastsq_swb(params,df,n_regs,reg_list,lam_method):
     #params is list of lambda estimate + beta estimates 
-    #lam method = 'exp','linear','none'
-
-
-    betas = params[1:]
-    lam = params[0]
-
+    betas = params[1:] # list of beta estimates - first index = intercept 
+    lam = params[0] #lamda estimate
     if lam_method == 'exp':
         ls = [1,lam,lam**2] #exponential lambda 
     elif lam_method == 'linear':
         ls = [1,lam,lam*2] #linear lambda 
     else: 
         ls = [1,1,1] #none
-    
-    param_eq = 0
         
+    #initialize mood estimate equation     
+    param_eq = 0
 
     for n in range(n_regs):
         #beta value (intercept is first index, so need +1)
@@ -174,214 +65,76 @@ def leastsq_swb(params,df,n_regs,reg_list,lam_method):
 
         param_eq += (b*l1*reg1_vec) + (b*l2*reg2_vec) + (b*l3*reg3_vec)
 
-
-    mood_est = betas[0] + param_eq
-    mood_obs = np.array(df['zscore_rate'])
+    # get the estimated mood rating from the parameter equation (plus intercept!)
+    mood_est = [betas[0]]*len(df) + param_eq
+    mood_obs = np.array(df['z_rate'])
     #compute the vector of residuals
     mood_residuals = mood_obs - mood_est
-    return mood_residuals
+    rss = np.sum(mood_residuals**2)
 
+    if output == 'rss':
+        return rss
+    
+    # output for fitting 
+    elif output == 'all': 
+        subj_dict = {'params'     : params,
+                     'reg_list'   : reg_list,
+                     'lam_method' : lam_method,
+                     'mood_est'   : mood_est,
+                     'mood_obs'   : mood_obs,
+                     'mood_resid' : mood_residuals,
+                     'rss'        : rss,
+                     'bic'        : len(params) * np.log(len(mood_residuals)) - 2*np.log((rss/len(mood_residuals))),
+                     'aic'        : 2*len(params) + n*np.log(rss/len(mood_residuals))
+                     } #https://stats.stackexchange.com/questions/338501/calculating-the-aicc-and-bic-with-rss-instead-of-likelihood
 
+        return subj_dict
 
-
-#function to extract mood estimates from already optimized parameters 
-
-def fit_swb(df,subj_ids,params,n_regs,reg_list,lam_method):
-    #lam method = 'exp','linear','none'
-
-    mood_est_df = pd.DataFrame(columns = subj_ids)
-    resid_df = pd.DataFrame(columns = subj_ids)
-    rss_dict = {} 
-    aic_dict = {}
-    bic1_dict = {}
-    bic2_dict = {}
-    rsq_dict = {}
-
-
-    for ix, subj_id in enumerate(subj_ids):
-
-        subj_df = df[df["subj_id"]==subj_id]
-        lam = params[subj_id][0]
-        betas = list(params[subj_id][1:])
-        #params is list of lambda estimate + beta estimates 
-        
-        if lam_method == 'exp':
-            ls = [1,lam,lam**2] #exponential lambda 
-        elif lam_method == 'linear':
-            ls = [1,lam,lam*2] #linear lambda 
-        else: 
-            ls = [1,1,1] #no lambda 
-        
-        param_eq = 0
-
-        for n in range(n_regs):
-            #beta value (intercept is first index, so need +1)
-            b = betas[n+1] 
-            l1 = ls[0] #t-1 decay
-            l2 = ls[1] #t-2 decay
-            l3 = ls[2] #t-3 decay
-            #regressor index for t-1,t-2,t-3
-            i1 = (n*3)
-            i2 = (n*3)+1
-            i3 = (n*3)+2
-            #regressor vars to extract from df 
-            reg1 = reg_list[i1]
-            reg2 = reg_list[i2]
-            reg3 = reg_list[i3]
-            #regresssor vectors 
-            reg1_vec = np.array(df[reg1])
-            reg2_vec = np.array(df[reg2])
-            reg3_vec = np.array(df[reg3])
-
-            param_eq += (b*l1*reg1_vec) + (b*l2*reg2_vec) + (b*l3*reg3_vec)
-
-
-        mood_est = betas[0] + param_eq
-        mood_obs = np.array(df['zscore_rate'])
-        mood_residuals = mood_obs - mood_est
-        rss = sum(mood_residuals**2)
-        K  = len(betas)+1
-        AIC = (2*K) + (len(mood_residuals)*np.log(rss/len(mood_residuals)))
-        BIC1 = (len(mood_residuals) * np.log(rss/len(mood_residuals))) + (K*np.log(len(mood_residuals)))
-        BIC2 = (-2 * np.log(rss/len(mood_residuals))) + (K*np.log(len(mood_residuals)))
-        rsq = r2_score(mood_obs,mood_est)
-
-        mood_est_df[subj_id] = mood_est
-        resid_df[subj_id] = mood_residuals
-        rss_dict[subj_id] = rss
-        aic_dict[subj_id] = AIC
-        bic1_dict[subj_id] = BIC1
-        bic2_dict[subj_id] = BIC2
-        rsq_dict[subj_id] = rsq
-
-
-    return mood_est_df, resid_df, rss_dict, aic_dict, bic1_dict, bic2_dict, rsq_dict
 
 #### option to use minimize function to minimize rss instead of least_sq optimization 
+def min_rss_swb(subj_df, n_regs, reg_list, param_inits):
+    
+    #model_df:     model data for subj 
+    #subj_id:      subj data for fitting
+    #n_regs:       number of task variables in model (ex: ev,cr,rpe = 3 n_regs)
+    #reg_list:     list of column names in df as str (should be len n_regs*3, 3 trials for each variable)
+    #param_inits:  list of initial parameter value combinations to iterate through - fn will run through optimization for each item in param_guesses
+                    #will be in form [(nparams)(nparams)]
 
-def run_rss_swb(df, subj_ids, n_regs, reg_list,intercept=True):
-    #df = model data for all subjects
-    #subj_ids = desired subj in df
-    #n_regs = number of task variables in model (ex: ev,cr,rpe = 3 n_regs)
-    #reg_list = list of column names in df as str (should be len n_regs*3, 3 trials for each variable)
+    #initialize rss value to minimize 
+    rss_optim   = np.inf
+    best_result = []
 
-    #mood_est_df = pd.DataFrame(columns = subj_ids)
-    optim_inits_df = pd.DataFrame(columns = subj_ids)
-    param_fits_df = pd.DataFrame(columns = subj_ids)
-    aic_dict = {}
-    bic1_dict = {}
-    bic2_dict = {}
-    #rsq_dict = {}
+    n_beta_bounds = n_regs+1
+    bounds = tuple([(0,1)]+[(-100,100)]*n_beta_bounds)
 
+    for params in param_inits:
 
-    for ix, subj_id in enumerate(subj_ids):
-
-        subj_df = df[df["subj_id"]==subj_id]
-
-        #set sse to np.inf to compare to optim result
-        param_fits = []
-        optim_vars = []
-        rss_optim = np.inf
-
-        #start multiple initializations for betas and lambda - optimize each time and find best, arbitrarily picked n_regs for consistency
-        for n in range(n_regs):
-
-            lambda_init = random.uniform(0, 1)
-            betas_init = np.random.random(size = (n_regs+1))
-            param_inits = np.hstack((lambda_init,betas_init))
-            n_beta_bounds = len(betas_init)
-            #lambda must be constrained at 0-1, then rest of params do not need to be constrained
-            lower = [0] 
-            upper = [1]
-            for b in range(n_beta_bounds):
-                lower.append(-100)
-                upper.append(100)
-            bounds = (lower,upper) #bounds must be in form ([all lower bounds],[all upper bounds])
-
-
-            
-            if intercept==False:
-                lambda_init = random.uniform(0, 1) #don't randomly initialize - high medium low for each parameter 
-                betas_init = np.random.random(size = (n_regs))
-                param_inits = np.hstack((lambda_init,0,betas_init))
-                
-            res = minimize(rss_swb, # objective function
-                        (param_inits),
-                        args=(subj_df,n_regs,reg_list),
-                        method='L-BFGS-B') # arguments
-            
-            rss = res.fun #residuals output from best model
-            if rss < rss_optim: #goal > minimize cost function 
-                rss_optim = rss                
-                optim_vars = param_inits
-                param_fits = res.x
-
+        #run minimization for each param combo in param_inits
+        result = minimize(fit_swb, # objective function
+                    params,
+                    args=(subj_df,n_regs,reg_list), #reg_list should be in long form (3 str per n reg)
+                    bounds=bounds) # arguments #method='L-BFGS-B'
         
-        if rss_optim == np.inf:
-            print('No solution for ',subj_id)
-            #mood_est = np.empty(shape=len(residuals))
-            optim_vars = np.empty(shape=len(param_inits))
-            param_fits = np.empty(shape=len(param_inits))
-            AIC = 0
-            BIC1 = 0
-            BIC2 = 0
-            #rsq = 0
-        else:
-            #mood_est = np.array(subj_df.zscore_rate - residuals)
-            AIC = (2*len(param_inits)) + (50*np.log(rss_optim/50))
-            BIC1 = (50 * np.log(rss_optim/50)) + (len(param_inits)*np.log(50))
-            BIC2 = (-2 * np.log(rss_optim/50)) + (len(param_inits)*np.log(50))
-            #rsq = r2_score(np.array(subj_df.zscore_rate),mood_est)
-
-        #mood_est_df[subj_id] = mood_est
-        optim_inits_df[subj_id] = optim_vars
-        param_fits_df[subj_id] = param_fits
-        aic_dict[subj_id] = AIC
-        bic1_dict[subj_id] = BIC1
-        bic2_dict[subj_id] = BIC2
+        #extract rss from result output 
+        rss = result.fun #residuals output from best model
+        if rss < rss_optim: #goal to minimize cost function, find params that give lowest possible rss
+            rss_optim = rss                
+            best_result = result
     
+    if rss_optim == np.inf:
+        print('No solution for ',subj_id)
+        return None
     
-    return optim_inits_df, param_fits_df, aic_dict,bic1_dict,bic2_dict
+    else:
+        best_params = best_result.x
+        #fit model with optim params
+        fit_dict = {}
+        fit_dict['best_result'] = best_result
+        fit_dict['subj_dict']   = fit_swb(best_params,subj_df,n_regs,reg_list,output='all') #run fit function to get all outputs (better than 2 separate fns)
 
-
-#function to estimate residuals for parameter optimization
-def rss_swb(params,df,n_regs,reg_list):
-    #params is list of lambda estimate + beta estimates 
-    lam = params[0]
-    ls = [1,lam,lam**2]
-    betas = params[1:]
-    param_eq = 0
-
-    for n in range(n_regs):
-        #beta value (intercept is first index, so need +1)
-        b = betas[n+1] 
-        l1 = ls[0] #t-1 decay
-        l2 = ls[1] #t-2 decay
-        l3 = ls[2] #t-3 decay
-        #regressor index for t-1,t-2,t-3
-        i1 = (n*3)
-        i2 = (n*3)+1
-        i3 = (n*3)+2
-        #regressor vars to extract from df 
-        reg1 = reg_list[i1]
-        reg2 = reg_list[i2]
-        reg3 = reg_list[i3]
-        #regresssor vectors 
-        reg1_vec = np.array(df[reg1])
-        reg2_vec = np.array(df[reg2])
-        reg3_vec = np.array(df[reg3])
-
-        param_eq += (b*l1*reg1_vec) + (b*l2*reg2_vec) + (b*l3*reg3_vec)
-
-
-    mood_est = betas[0] + param_eq
-    mood_obs = np.array(df['zscore_rate'])
-    #compute the vector of residuals
-    mood_residuals = mood_obs - mood_est
-    rss = sum(mood_residuals**2)
-    return rss
-
-
+    
+    return fit_dict
 
 
 ############ prospect theory models ##############
@@ -1651,3 +1404,147 @@ def get_pt_utils(task): #updated to be correct calculations
 
 
     return task
+
+def get_glm_data_all_subj(model_data_vars,subj_ids,behav_dir):
+    
+    #dictionary to hold all subj data
+    all_subj_model_dict = {}   
+
+    # make a list of regressor names from regressor list - each regressor needs 3 vars for t-1,t-2,t-3 trials 
+    model_data_dict_keys = []
+    for var in model_data_vars:
+        t1_col = var + '_t-1' 
+        t2_col = var + '_t-2'
+        t3_col = var + '_t-3'
+        model_data_dict_keys.append(t1_col)
+        model_data_dict_keys.append(t2_col)
+        model_data_dict_keys.append(t3_col)
+
+    #create model data pandas df with model_data_dict_keys as column names 
+    model_df_col_names = ['subj_id','round','rate','zscore_rate','bdi','bai'] + model_data_dict_keys
+    all_subj_model_df = pd.DataFrame(columns = model_df_col_names)
+      
+
+    for subj_id in subj_ids:
+
+        task_df = pd.read_csv(f'{behav_dir}{subj_id}_pt_task_data')
+        rate_df = pd.read_csv(f'{behav_dir}{subj_id}_rate_data')
+
+        # make a list of regressor names from regressor list - each regressor needs 3 vars for t-1,t-2,t-3 trials 
+        model_data_dict_keys = []
+        for var in model_data_vars:
+            t1_col = var + '_t-1' 
+            t2_col = var + '_t-2'
+            t3_col = var + '_t-3'
+            model_data_dict_keys.append(t1_col)
+            model_data_dict_keys.append(t2_col)
+            model_data_dict_keys.append(t3_col)
+
+        #create model data dictionary with model_data_dict_keys as keys and empty lists as their values (can use append function in loop now)
+        model_data_dict = {}
+        for i in model_data_dict_keys:
+            model_data_dict[i] = []
+
+        # #get rating info
+        round       = rate_df['Round'][max(loc for loc, val in enumerate(rate_df['Round']) if val == 1)+1:] #need index of last round 1 because some pts have multiple round 1 scores, start after last round 1 index
+        rate        = rate_df['Rating'][max(loc for loc, val in enumerate(rate_df['Round']) if val == 1)+1:]
+        zscore_rate = rate_df['zscore_mood'][max(loc for loc, val in enumerate(rate_df['Round']) if val == 1)+1:]
+        bdi         = rate_df['bdi'][max(loc for loc, val in enumerate(rate_df['Round']) if val == 1)+1:]
+        bai         = rate_df['bai'][max(loc for loc, val in enumerate(rate_df['Round']) if val == 1)+1:]
+
+
+        #add subj info and non task vars to model data dict
+        model_data_dict['subj_id'] = [subj_id]*50
+        model_data_dict['round'] = round
+        model_data_dict['rate'] = rate
+        model_data_dict['zscore_rate'] = zscore_rate
+        model_data_dict['bdi'] = bdi
+        model_data_dict['bai'] = bai
+
+        for r in round: #iterate through mood rating rounds (4,7,10...151)
+            #calculate row index for task df
+            t3 = r-4 #t-3 trial 
+            t2 = r-3 #t-2 trial
+            t1 = r-2 #t-1 trial
+            
+            for reg in model_data_vars:
+                # make reg name strings for model data keys
+                reg_t3_col = reg + '_t-3'
+                reg_t2_col = reg + '_t-2'
+                reg_t1_col = reg + '_t-1'
+
+                model_data_dict[reg_t3_col].append(task_df[reg][t3])
+                model_data_dict[reg_t2_col].append(task_df[reg][t2])
+                model_data_dict[reg_t1_col].append(task_df[reg][t1])
+        
+        #add to master dictionary 
+        all_subj_model_dict[subj_id] = model_data_dict #in case dictionary of dictionaries is easier to work with later
+        #add to all_subj_model_df
+        all_subj_model_df = pd.concat([all_subj_model_df,pd.DataFrame(model_data_dict)])
+    
+    return model_data_dict
+
+def get_glm_data_single_subj(subj_id,behav_dir,model_data_vars):
+
+    #load subject task data - pt data  
+    task_df = pd.read_csv(f'{behav_dir}{subj_id}_pt_task_data')
+    rate_df = pd.read_csv(f'{behav_dir}{subj_id}_rate_data')
+
+    # make a list of regressor names from regressor list - each regressor needs 3 vars for t-1,t-2,t-3 trials 
+    model_data_dict_keys = []
+    for var in model_data_vars:
+        t1_col = var + '_t-1' 
+        t2_col = var + '_t-2'
+        t3_col = var + '_t-3'
+        model_data_dict_keys.append(t1_col)
+        model_data_dict_keys.append(t2_col)
+        model_data_dict_keys.append(t3_col)
+    
+    #create model data dictionary with model_data_dict_keys as keys and empty lists as their values (can use append function in loop now)
+    model_data_dict = {}
+    for i in model_data_dict_keys:
+        model_data_dict[i] = []
+
+    # #get rating info
+    round  = rate_df['Round'][max(loc for loc, val in enumerate(rate_df['Round']) if val == 1)+1:] #need index of last round 1 because some pts have multiple round 1 scores, start after last round 1 index
+    rate   = rate_df['Rating'][max(loc for loc, val in enumerate(rate_df['Round']) if val == 1)+1:]
+    z_rate = rate_df['zscore_mood'][max(loc for loc, val in enumerate(rate_df['Round']) if val == 1)+1:]
+    bdi    = rate_df['bdi'][max(loc for loc, val in enumerate(rate_df['Round']) if val == 1)+1:]
+    bai    = rate_df['bai'][max(loc for loc, val in enumerate(rate_df['Round']) if val == 1)+1:]
+
+    #check if task data is shorter than last round idx
+    task_len = len(task_df)
+    if task_len < list(round)[-1]:
+        round  = list(round)[:-1]
+        rate   = list(rate)[:-1]
+        z_rate = list(z_rate)[:-1]
+        bdi    = list(bdi)[:-1]
+        bai    = list(bai)[:-1]
+
+
+
+    #add subj info and non task vars to model data dict
+    model_data_dict['subj_id']  = [subj_id]*len(round)
+    model_data_dict['round']    = round
+    model_data_dict['rate']     = rate
+    model_data_dict['z_rate']   = z_rate
+    model_data_dict['bdi']      = bdi
+    model_data_dict['bai']      = bai
+
+    for r in round: #iterate through mood rating rounds (4,7,10...151)
+        #calculate row index for task df
+        t3 = r-4 #t-3 trial 
+        t2 = r-3 #t-2 trial
+        t1 = r-2 #t-1 trial
+        
+        for reg in model_data_vars:
+            # make reg name strings for model data keys
+            reg_t3_col = reg + '_t-3'
+            reg_t2_col = reg + '_t-2'
+            reg_t1_col = reg + '_t-1'
+
+            model_data_dict[reg_t3_col].append(task_df[reg][t3])
+            model_data_dict[reg_t2_col].append(task_df[reg][t2])
+            model_data_dict[reg_t1_col].append(task_df[reg][t1])
+    
+    return model_data_dict
