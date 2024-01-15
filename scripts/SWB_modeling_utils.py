@@ -172,7 +172,7 @@ def leastsq_swb(params,df,n_regs,reg_list,lam_method):
         reg2_vec = np.array(df[reg2])
         reg3_vec = np.array(df[reg3])
 
-        param_eq += (b*l1*reg1_vec) + (b*l2*reg2_vec) + (b*l2*reg2_vec)
+        param_eq += (b*l1*reg1_vec) + (b*l2*reg2_vec) + (b*l3*reg3_vec)
 
 
     mood_est = betas[0] + param_eq
@@ -233,7 +233,7 @@ def fit_swb(df,subj_ids,params,n_regs,reg_list,lam_method):
             reg2_vec = np.array(df[reg2])
             reg3_vec = np.array(df[reg3])
 
-            param_eq += (b*l1*reg1_vec) + (b*l2*reg2_vec) + (b*l2*reg2_vec)
+            param_eq += (b*l1*reg1_vec) + (b*l2*reg2_vec) + (b*l3*reg3_vec)
 
 
         mood_est = betas[0] + param_eq
@@ -371,7 +371,7 @@ def rss_swb(params,df,n_regs,reg_list):
         reg2_vec = np.array(df[reg2])
         reg3_vec = np.array(df[reg3])
 
-        param_eq += (b*l1*reg1_vec) + (b*l2*reg2_vec) + (b*l2*reg2_vec)
+        param_eq += (b*l1*reg1_vec) + (b*l2*reg2_vec) + (b*l3*reg3_vec)
 
 
     mood_est = betas[0] + param_eq
@@ -488,6 +488,9 @@ def fit_base_pt(params, subj_df, prior=None, output='mle'):
         # convert EV to choice probabilities via softmax
         p_gamble = np.exp(inverse_temp*util_gamble) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
         p_safe = np.exp(inverse_temp*util_safe) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
+        
+        p_g.append(p_gamble)
+        p_s.append(p_safe)
 
         # append probability of chosen options
         if choice == 'gamble':
@@ -529,7 +532,7 @@ def fit_base_pt(params, subj_df, prior=None, output='mle'):
                      'GambleChoice'   : choice_list,
                      'ChoiceProb'     : choice_prob_list,
                      'ChoiceUtil'     : choice_util,
-                     'ChoicePred'     : choice_pred,
+                     'ChoicePred'     : choice_pred_list,
                      'ChoicePredProb' : choice_pred_prob,
                      'util_gamble'    : util_g,
                      'util_safe'      : util_s, 
@@ -681,7 +684,7 @@ def norm2invtmp(invtemp):
     return 10 / (1 + np.exp(-invtemp))
 
 #negll calculation and fit fn (update MLE fns to have two output options!)
-def negll_base_pt_pyEM(params, subj_df,prior=None, output='npl'):
+def negll_base_pt_pyEM(params, subj_df, prior=None, output='npl'):
 
     risk_aversion, loss_aversion, inverse_temp = params
     
@@ -696,17 +699,13 @@ def negll_base_pt_pyEM(params, subj_df,prior=None, output='npl'):
         return 10000000
     
     inverse_temp = norm2invtmp(inverse_temp) #transform parameter from gaussian space back into native model space using parameter-specific sigmoid function
-    this_beta_bounds = [0.00001, 8]  #set upper and lower bounds
+    this_beta_bounds = [0.00001, 10]  #set upper and lower bounds
     if inverse_temp < min(this_beta_bounds) or inverse_temp > max(this_beta_bounds):  #prevent estimation from parameter values outside of bounds 
         return 10000000
 
     #Initialize choice probability vector to calculate negative log likelihood
-        # actual subj choice info   
-    choice_list = []
     choice_prob_list = []
-        # predicted subj choice info 
-    choice_pred_list = []
-    choice_pred_prob = []
+    choice_list = []
 
     #Initialize empty data vectors to return all relevant data if output = 'all'
     tr          = []
@@ -762,7 +761,7 @@ def negll_base_pt_pyEM(params, subj_df,prior=None, output='npl'):
         
         util_gamble = weighted_high_bet + weighted_low_bet
         util_g.append(util_gamble)
-    
+      
 
         # transform safe bet value to utility (safe)
         if safe_bet >= 0: #gain or mix trials
@@ -779,7 +778,9 @@ def negll_base_pt_pyEM(params, subj_df,prior=None, output='npl'):
         # convert EV to choice probabilities via softmax
         p_gamble = np.exp(inverse_temp*util_gamble) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
         p_safe = np.exp(inverse_temp*util_safe) / ( np.exp(inverse_temp*util_gamble) + np.exp(inverse_temp*util_safe) )
-        #p_safe = 1-p_gamble
+        # p_safe = 1-p_gamble
+        p_g.append(p_gamble)
+        p_s.append(p_safe)
 
         # append probability of chosen options
         if choice == 'gamble':
@@ -789,15 +790,6 @@ def negll_base_pt_pyEM(params, subj_df,prior=None, output='npl'):
         elif choice == 'safe':
             choice_prob_list.append(p_safe)
             choice_util.append(p_safe)
-                
-        #getting stochastic predictions of model 
-        choice_pred = random.choices(['gamble','safe'],weights=[p_gamble,p_safe])[0]
-        choice_pred_list.append(choice_pred)
-
-        if choice_pred == 'gamble':
-            choice_pred_prob.append(p_gamble)
-        else:
-            choice_pred_prob.append(p_safe)
 
     # calculate negative log likelihood of choice probabilities 
             
@@ -825,27 +817,25 @@ def negll_base_pt_pyEM(params, subj_df,prior=None, output='npl'):
         else: # NLL fit 
             return negll
         
-    elif output == 'all': 
-        subj_dict = {'params'         : [risk_aversion, loss_aversion, inverse_temp],
-                     'tr'             : tr,
-                     'TrialType'      : trial_list,
-                     'GambleChoice'   : choice_list,
-                     'ChoiceProb'     : choice_prob_list,
-                     'ChoiceUtil'     : choice_util,
-                     'ChoicePred'     : choice_pred,
-                     'ChoicePredProb' : choice_pred_prob,
-                     'util_gamble'    : util_g,
-                     'util_safe'      : util_s, 
-                     'p_gamble'       : p_g,
-                     'p_safe'         : p_s,
-                     'HighBet'        : high,
-                     'LowBet'         : low,
-                     'SafeBet'        : safe,
-                     'WeightedHigh'   : w_high,
-                     'WeightedLow'    : w_low,
-                     'WeightedSafe'   : w_safe,
-                     'negll'          : negll,
-                     'BIC'            : len(params) * np.log(150) + 2*negll}
+    elif output == 'all': #WHATEVER YOU WANT TO OUTPUT IF NOT OPTIMIZING
+        subj_dict = {'params'      : [risk_aversion, loss_aversion, inverse_temp],
+                     'tr'          : tr,
+                     'TrialType'   : trial_list,
+                     'GambleChoice':choice_list,
+                     'ChoiceProb'  : choice_prob_list,
+                     'ChoiceUtil'  : choice_util,
+                     'util_gamble' : util_g,
+                     'util_safe'   : util_s, 
+                     'p_gamble'    : p_g,
+                     'p_safe'      : p_s,
+                     'HighBet'     : high,
+                     'LowBet'      : low,
+                     'SafeBet'     : safe,
+                     'WeightedHigh': w_high,
+                     'WeightedLow' : w_low,
+                     'WeightedSafe': w_safe,
+                     'negll'       : negll,
+                     'bic'         : len(params) * np.log(150) + 2*negll}
         
         return subj_dict
 
