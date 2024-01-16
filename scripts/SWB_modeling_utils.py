@@ -25,6 +25,7 @@ import random
     # param_init
     # simulation_norm_gamble_choices
     # simulation_util_norm_gamble_choices
+    # get_pt_task_data_mle_emmap
     # get_pt_utils
     # get_glm_data_single_subj
     # get_glm_data_all_subj
@@ -126,7 +127,7 @@ def min_rss_swb(subj_df, n_regs, reg_list, param_inits,lam_method='exp'):
     if lam_method == 'none': #remove lam from estimation + bounds input
         bounds = tuple([(-100,100)]*n_beta_bounds)
     else: 
-        bounds = tuple([(0,1)]+[(-100,100)]*n_beta_bounds)
+        bounds = tuple([(0.001,1)]+[(-100,100)]*n_beta_bounds)
 
     for params in param_inits:
 
@@ -1095,8 +1096,324 @@ def simulation_util_norm_gamble_choices(df):
     return loss_dict, mix_dict, gain_dict
 
 
+def get_pt_task_data_mle_emmap(subj_ids,behav_dir,pt_mle_fits,pt_emmap_fits):
+
+    # load task data for each subj, calculate pt params, add all params to subj task_data & save as pt_task_data
+    # just add - utilsafe, utilgamble, utilchoice, wsafe, whigh, wlow, psafe, pgamble x 2 for mle & emmap
+    # need to calculate then add - utiltCPE, utildCPE, utiltRegret, utildRegret, utiltRelief, utildRelief, utilRPe, utilpRPE,utilnRPE x 2 for mle & emmap
+    
+    pt_task_dfs = []
+
+    for subj_id in subj_ids:
+        #load preprocessed task data with model-free params
+        subj_df = pd.read_csv(f'{behav_dir}{subj_id}_task_data')
+        #load pt fits data dicts 
+            #load mle subj data
+        mle_data = pt_mle_fits[subj_id]['subj_dict']
+            #emmap param calculations
+        emmap_data = pt_emmap_fits[subj_id]
+
+        #add already calculated mle params to subj df
+        subj_df['util_safe_mle']   = mle_data['util_safe']
+        subj_df['util_gamble_mle'] = mle_data['util_gamble']
+        # subj_df['util_choice_mle'] = mle_data['ChoiceUtil'] #only length 149?
+        subj_df['wSafe_mle']       = mle_data['WeightedSafe']
+        subj_df['wHigh_mle']       = mle_data['WeightedHigh']
+        subj_df['wLow_mle']        = mle_data['WeightedLow']
+        subj_df['p_safe_mle']      = mle_data['p_safe']
+        subj_df['p_gamble_mle']    = mle_data['p_gamble']
+
+        
+        #already calculated emmap params to subj_df 
+        subj_df['util_safe_emmap']   = emmap_data['util_safe']
+        subj_df['util_gamble_emmap'] = emmap_data['util_gamble']
+        # subj_df['util_choice_emmap'] = emmap_data['ChoiceUtil'] #only length 149?
+        subj_df['wSafe_emmap']       = emmap_data['WeightedSafe']
+        subj_df['wHigh_emmap']       = emmap_data['WeightedHigh']
+        subj_df['wLow_emmap']        = emmap_data['WeightedLow']
+        subj_df['p_safe_emmap']      = emmap_data['p_safe']
+        subj_df['p_gamble_emmap']    = emmap_data['p_gamble']
+
+        #calculate cpe/rpe params + add to subj df 
+            #must loop through subj_df 
+        #mle var calculations
+        tcpe_mle = []
+        dcpe_mle = []
+        tcf_mle  = []
+        dcf_mle  = []
+        treg_mle = []
+        dreg_mle = []
+        trel_mle = []
+        drel_mle = []
+        rpe_mle  = []
+        prpe_mle = []
+        nrpe_mle = []
+        #emmap var calculations
+        tcpe_emmap = []
+        dcpe_emmap = []
+        tcf_emmap  = []
+        dcf_emmap  = []
+        treg_emmap = []
+        dreg_emmap = []
+        trel_emmap = []
+        drel_emmap = []
+        rpe_emmap  = []
+        prpe_emmap = []
+        nrpe_emmap = []
+
+        for t in range(len(subj_df)):
+            trial_info = subj_df.iloc[t]
+            if trial_info['GambleChoice']=='gamble':
+                # subj choice = gamble
+                if trial_info['Outcome']=='good':
+                # gamble outcome = good > won high bet 
+                    
+                    # cpe calculations
+                    tcpe_mle.append(mle_data['WeightedHigh'][t]-mle_data['WeightedLow'][t])
+                    tcpe_emmap.append(emmap_data['WeightedHigh'][t]-emmap_data['WeightedLow'][t])
+                    dcpe_mle.append(mle_data['WeightedHigh'][t]-mle_data['WeightedSafe'][t])
+                    dcpe_emmap.append(emmap_data['WeightedHigh'][t]-emmap_data['WeightedSafe'][t])
+                    tcf_mle.append(mle_data['WeightedLow'][t]) #### consider whether these should be positive or negative later
+                    tcf_emmap.append(emmap_data['WeightedLow'][t]) 
+                    dcf_mle.append(mle_data['WeightedSafe'][t])
+                    dcf_emmap.append(emmap_data['WeightedSafe'][t])
+
+                    # regret calculations
+                    treg_mle.append(0)
+                    treg_emmap.append(0)
+                    dreg_mle.append(0)
+                    dreg_emmap.append(0)
+
+                    # relief calculations
+                    trel_mle.append(mle_data['WeightedHigh'][t]-mle_data['WeightedLow'][t])
+                    trel_emmap.append(emmap_data['WeightedHigh'][t]-emmap_data['WeightedLow'][t])
+                    drel_mle.append(mle_data['WeightedHigh'][t]-mle_data['WeightedSafe'][t])
+                    drel_emmap.append(emmap_data['WeightedHigh'][t]-emmap_data['WeightedSafe'][t])
+
+                    # rpe calculations
+                    rpe_mle.append(mle_data['WeightedHigh'][t]-mle_data['util_gamble'][t])
+                    rpe_emmap.append(emmap_data['WeightedHigh'][t]-emmap_data['util_gamble'][t])
+                    prpe_mle.append(mle_data['WeightedHigh'][t]-mle_data['util_gamble'][t])
+                    prpe_emmap.append(emmap_data['WeightedHigh'][t]-emmap_data['util_gamble'][t])
+                    nrpe_mle.append(0)
+                    nrpe_emmap.append(0)
+
+
+                elif trial_info['Outcome']=='bad':
+                # gamble outcome = bad > won low bet 
+                    
+                    # cpe calculations
+                    tcpe_mle.append(mle_data['WeightedLow'][t]-mle_data['WeightedHigh'][t])
+                    tcpe_emmap.append(emmap_data['WeightedLow'][t]-emmap_data['WeightedHigh'][t])
+                    dcpe_mle.append(mle_data['WeightedLow'][t]-mle_data['WeightedSafe'][t])
+                    dcpe_emmap.append(emmap_data['WeightedLow'][t]-emmap_data['WeightedSafe'][t])
+                    tcf_mle.append(mle_data['WeightedHigh'][t])
+                    tcf_emmap.append(emmap_data['WeightedHigh'][t])
+                    dcf_mle.append(mle_data['WeightedSafe'][t])
+                    dcf_emmap.append(emmap_data['WeightedSafe'][t])
+
+                    # regret calculations
+                    treg_mle.append(mle_data['WeightedLow'][t]-mle_data['WeightedHigh'][t])                
+                    treg_emmap.append(emmap_data['WeightedLow'][t]-emmap_data['WeightedHigh'][t])
+                    dreg_mle.append(mle_data['WeightedLow'][t]-mle_data['WeightedSafe'][t])
+                    dreg_emmap.append(emmap_data['WeightedLow'][t]-emmap_data['WeightedSafe'][t])
+
+                    # relief calculations
+                    trel_mle.append(0)
+                    trel_emmap.append(0)
+                    drel_mle.append(0)
+                    drel_emmap.append(0)
+
+                    # rpe calculations
+                    rpe_mle.append(mle_data['WeightedLow'][t]-mle_data['util_gamble'][t])
+                    rpe_emmap.append(emmap_data['WeightedLow'][t]-emmap_data['util_gamble'][t])
+                    prpe_mle.append(0)
+                    prpe_emmap.append(0)
+                    nrpe_mle.append(mle_data['WeightedLow'][t]-mle_data['util_gamble'][t])
+                    nrpe_emmap.append(emmap_data['WeightedLow'][t]-emmap_data['util_gamble'][t])
+
+                else: 
+                #fail trials
+                    tcpe_mle.append(0)
+                    tcpe_emmap.append(0)
+                    dcpe_mle.append(0)
+                    dcpe_emmap.append(0)
+                    tcf_mle.append(0)
+                    tcf_emmap.append(0)
+                    dcf_mle.append(0)
+                    dcf_emmap.append(0)
+                    treg_mle.append(0)
+                    treg_emmap.append(0)
+                    dreg_mle.append(0)
+                    dreg_emmap.append(0)
+                    trel_mle.append(0)
+                    trel_emmap.append(0)
+                    drel_mle.append(0)
+                    drel_emmap.append(0)
+                    rpe_mle.append(0)
+                    rpe_emmap.append(0)
+                    prpe_mle.append(0)
+                    prpe_emmap.append(0)
+                    nrpe_mle.append(0)
+                    nrpe_emmap.append(0)
+
+
+            elif trial_info['GambleChoice']=='safe':
+                # subj choice = safe
+                if trial_info['Outcome']=='good':
+                # safe outcome = good > would have won low bet 
+                    
+                    # cpe calculations
+                    tcpe_mle.append(mle_data['WeightedSafe'][t]-mle_data['WeightedLow'][t])
+                    tcpe_emmap.append(emmap_data['WeightedSafe'][t]-emmap_data['WeightedLow'][t])
+                    dcpe_mle.append(mle_data['WeightedSafe'][t]-mle_data['WeightedLow'][t])
+                    dcpe_emmap.append(emmap_data['WeightedSafe'][t]-emmap_data['WeightedLow'][t])
+                    tcf_mle.append(mle_data['WeightedLow'][t])
+                    tcf_emmap.append(emmap_data['WeightedLow'][t])
+                    dcf_mle.append(mle_data['WeightedLow'][t])
+                    dcf_emmap.append(emmap_data['WeightedLow'][t])
+                    
+                    # regret calculations
+                    treg_mle.append(0)
+                    treg_emmap.append(0)
+                    dreg_mle.append(0)
+                    dreg_emmap.append(0)
+
+                    # relief calculations
+                    trel_mle.append(mle_data['WeightedSafe'][t]-mle_data['WeightedLow'][t])
+                    trel_emmap.append(emmap_data['WeightedSafe'][t]-emmap_data['WeightedLow'][t])
+                    drel_mle.append(mle_data['WeightedSafe'][t]-mle_data['WeightedLow'][t])
+                    drel_emmap.append(emmap_data['WeightedSafe'][t]-emmap_data['WeightedLow'][t])
+                    
+                    # rpe calculations
+                    rpe_mle.append(0)
+                    rpe_emmap.append(0)
+                    prpe_mle.append(0)
+                    prpe_emmap.append(0)
+                    nrpe_mle.append(0)
+                    nrpe_emmap.append(0)
+
+                elif trial_info['Outcome']=='bad':
+                # safe outcome = bad > would have won high bet
+                    
+                    # cpe calculations
+                    tcpe_mle.append(mle_data['WeightedSafe'][t]-mle_data['WeightedHigh'][t])
+                    tcpe_emmap.append(emmap_data['WeightedSafe'][t]-emmap_data['WeightedHigh'][t])
+                    dcpe_mle.append(mle_data['WeightedSafe'][t]-mle_data['WeightedHigh'][t])
+                    dcpe_emmap.append(emmap_data['WeightedSafe'][t]-emmap_data['WeightedHigh'][t])
+                    tcf_mle.append(mle_data['WeightedHigh'][t])
+                    tcf_emmap.append(emmap_data['WeightedHigh'][t])
+                    dcf_mle.append(mle_data['WeightedHigh'][t])
+                    dcf_emmap.append(emmap_data['WeightedHigh'][t])
+                    
+                    # regret calculations
+                    treg_mle.append(mle_data['WeightedSafe'][t]-mle_data['WeightedHigh'][t])                
+                    treg_emmap.append(emmap_data['WeightedSafe'][t]-emmap_data['WeightedHigh'][t])
+                    dreg_mle.append(mle_data['WeightedSafe'][t]-mle_data['WeightedHigh'][t])
+                    dreg_emmap.append(emmap_data['WeightedSafe'][t]-emmap_data['WeightedHigh'][t])
+
+                    # relief calculations
+                    trel_mle.append(0)
+                    trel_emmap.append(0)
+                    drel_mle.append(0)
+                    drel_emmap.append(0)
+
+                    # rpe calculations
+                    rpe_mle.append(0)
+                    rpe_emmap.append(0)
+                    prpe_mle.append(0)
+                    prpe_emmap.append(0)
+                    nrpe_mle.append(0)
+                    nrpe_emmap.append(0)
+
+                else: 
+                #fail trials    
+                    tcpe_mle.append(0)
+                    tcpe_emmap.append(0)
+                    dcpe_mle.append(0)
+                    dcpe_emmap.append(0)
+                    tcf_mle.append(0)
+                    tcf_emmap.append(0)
+                    dcf_mle.append(0)
+                    dcf_emmap.append(0)
+                    treg_mle.append(0)
+                    treg_emmap.append(0)
+                    dreg_mle.append(0)
+                    dreg_emmap.append(0)
+                    trel_mle.append(0)
+                    trel_emmap.append(0)
+                    drel_mle.append(0)
+                    drel_emmap.append(0)
+                    rpe_mle.append(0)
+                    rpe_emmap.append(0)
+                    prpe_mle.append(0)
+                    prpe_emmap.append(0)
+                    nrpe_mle.append(0)
+                    nrpe_emmap.append(0)
+
+            else: 
+            #fail trials
+                tcpe_mle.append(0)
+                tcpe_emmap.append(0)
+                dcpe_mle.append(0)
+                dcpe_emmap.append(0)
+                tcf_mle.append(0)
+                tcf_emmap.append(0)
+                dcf_mle.append(0)
+                dcf_emmap.append(0)
+                treg_mle.append(0)
+                treg_emmap.append(0)
+                dreg_mle.append(0)
+                dreg_emmap.append(0)
+                trel_mle.append(0)
+                trel_emmap.append(0)
+                drel_mle.append(0)
+                drel_emmap.append(0)
+                rpe_mle.append(0)
+                rpe_emmap.append(0)
+                prpe_mle.append(0)
+                prpe_emmap.append(0)
+                nrpe_mle.append(0)
+                nrpe_emmap.append(0)
+
+        
+        #add calculated cpe/rpe mle params to subj df 
+        subj_df['util_tCPE_mle']     = tcpe_mle
+        subj_df['util_dCPE_mle']     = dcpe_mle
+        subj_df['util_tCF_mle']      = tcf_mle
+        subj_df['util_dCF_mle']      = dcf_mle
+        subj_df['util_tRegret_mle']  = treg_mle
+        subj_df['util_dRegret_mle']  = dreg_mle
+        subj_df['util_tRelief_mle']  = trel_mle
+        subj_df['util_dRelief_mle']  = drel_mle
+        subj_df['util_RPE_mle']      = rpe_mle
+        subj_df['util_pRPE_mle']     = prpe_mle
+        subj_df['util_nRPE_mle']     = nrpe_mle
+
+        #add calculated cpe/rpe emmap params to subj df 
+        subj_df['util_tCPE_emmap']     = tcpe_emmap
+        subj_df['util_dCPE_emmap']     = dcpe_emmap
+        subj_df['util_tCF_emmap']      = tcf_emmap
+        subj_df['util_dCF_emmap']      = dcf_emmap
+        subj_df['util_tRegret_emmap']  = treg_emmap
+        subj_df['util_dRegret_emmap']  = dreg_emmap
+        subj_df['util_tRelief_emmap']  = trel_emmap
+        subj_df['util_dRelief_emmap']  = drel_emmap
+        subj_df['util_RPE_emmap']      = rpe_emmap
+        subj_df['util_pRPE_emmap']     = prpe_emmap
+        subj_df['util_nRPE_emmap']     = nrpe_emmap
+
+        #append to list of all subj dfs
+        pt_task_dfs.append(subj_df) 
+
+        #save new task df as pt_task_data
+        subj_df.to_csv(f'{behav_dir}{subj_id}_pt_task_data')
+
+        return pt_task_dfs
+
+
 def get_pt_utils(task): #updated to be correct calculations
-    #inputs:
+
 
     util_rpe = []
     util_tcpe = []
