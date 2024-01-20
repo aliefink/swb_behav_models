@@ -144,7 +144,7 @@ def min_rss_swb(subj_df, n_regs, reg_list, param_inits,lam_method='exp'):
         rss = result.fun #residuals output from best model
         if rss < rss_optim: #goal to minimize cost function, find params that give lowest possible rss
             rss_optim = rss                
-            best_result = result
+            best_result = result 
     
     if rss_optim == np.inf:
         print('No solution for this subject')
