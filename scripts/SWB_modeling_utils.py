@@ -1,6 +1,8 @@
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
+import scipy
+from scipy.stats import norm
 from scipy.optimize import least_squares, minimize
 from joblib import Parallel, delayed
 import random
@@ -9,6 +11,7 @@ import random
 
 #contains:
     # fit_swb
+    # fit_swb_pyEM
     # min_rss_swb
     # fit_base_pt
     # minimize_negll
@@ -102,6 +105,124 @@ def fit_swb(params,df,n_regs,reg_list,lam_method='exp',output='rss'):
                      } #https://stats.stackexchange.com/questions/338501/calculating-the-aicc-and-bic-with-rss-instead-of-likelihood
 
         return subj_dict
+    
+
+def fit_swb_pyEM(params,df,reg_list,lam_method='exp',prior=None, output='npl'):
+    # reg_list is list of regressor names estimate beta values from
+    # output can be rss, npl, or all
+    
+    var_list = reg_list[2:]
+    n_regs = len(var_list)
+    full_var_list = []
+    for var in var_list:
+        t1_col = var + '_t-1' 
+        t2_col = var + '_t-2'
+        t3_col = var + '_t-3'
+        # add modified variable names to list - should match column names in all_subj_model_df
+        full_var_list.append(t1_col)
+        full_var_list.append(t2_col)
+        full_var_list.append(t3_col)
+
+
+    #params is list of lambda estimate + beta estimates 
+    betas = params[1:] # list of beta estimates - first index = intercept 
+    K = len(params) # num free params in optimization - used to calculate BIC
+    lam = params[0] # lamda estimate
+
+    #transformation for em map estimation:
+    if output == 'npl':
+        lam = scipy.special.expit(lam) #logistic sigmoid conversion 
+        lam_bounds = [0.0000001, 1] #set upper and lower bounds
+        if lam< min(lam_bounds) or lam > max(lam_bounds): #prevent estimation from parameter values outside of bounds 
+            return 10000000
+        
+    if lam_method == 'exp':
+        ls = [1,lam,lam**2] #exponential lambda 
+    elif lam_method == 'linear':
+        ls = [1,lam,lam*2] #linear lambda 
+    else: 
+        betas = params # lam not being estimated - not in input params list 
+        lam = [1] #lamda
+        ls = [1,1,1] #none
+        K = K-1 #param count is -1 because lam is not being optimized
+        
+    #initialize mood estimate equation     
+    param_eq = 0
+
+    for n in range(n_regs):
+        b = betas[n+1] # first beta value = intercept, so need +1 for weights
+        l1 = ls[0] #t-1 decay
+        l2 = ls[1] #t-2 decay
+        l3 = ls[2] #t-3 decay
+        #regressor index for t-1,t-2,t-3
+        i1 = (n*3)
+        i2 = (n*3)+1
+        i3 = (n*3)+2
+        #regressor vars to extract from df 
+        reg1 = full_var_list[i1] #from full var list now, not reg list (reg list is just reg ids, not t-1 col names)
+        reg2 = full_var_list[i2]
+        reg3 = full_var_list[i3]
+        #regresssor vectors 
+        reg1_vec = np.array(df[reg1])
+        reg2_vec = np.array(df[reg2])
+        reg3_vec = np.array(df[reg3])
+
+        param_eq += (b*l1*reg1_vec) + (b*l2*reg2_vec) + (b*l3*reg3_vec)
+
+    # get the estimated mood rating from the parameter equation (plus intercept!)
+    mood_est = [betas[0]]*len(df) + param_eq
+    # actual mood obs
+    mood_obs = np.array(df['z_rate'])
+    #compute the vector of residuals
+    mood_residuals = np.subtract(mood_obs,mood_est)#mood_obs - mood_est #np.subtract(mood_obs, mood_est))
+    rss = np.sum(mood_residuals**2)
+
+    if output == 'rss':
+        return rss
+    
+    # output for EM MAP optimization - negative posterior likelihood from negll & likelihood of prior
+    elif output == 'npl':
+        if prior is not None:  # EM-fit: P(Choices | h) * P(h | O) should be maximised, therefore same as minimizing it with negative sign
+            #calculate negll 
+            resid_sigma = np.std(np.subtract(mood_obs, mood_est)) # std dev of residuals
+            #logpdf with estimates as zero point and residual std as scale (approx -0.5N(ln(2pi))+ln(rss/n)+1)
+            #https://clas.ucdenver.edu/marcelo-perraillon/sites/default/files/attached-files/week_6_mle.pdf formula on page 24
+            negll = -np.sum(norm.logpdf(mood_obs, loc=mood_est, scale=resid_sigma)) #negative sum of log of pdf for mood est w current params
+            #get f value from negll & likelihood of prior (posterior likelihood)
+                # get negll as positive likelihood, add current model likelihood & likelihood of prior, then take neg = negative posterior likelihood
+            fval = -(-negll + prior['logpdf'](params)) #np.sum(norm.logpdf(x, prior['mu'],np.sqrt(prior['sigma'])))
+             
+            if any(prior['sigma'] == 0):
+                this_mu = prior['mu']
+                this_sigma = prior['sigma']
+                this_logprior = prior['logpdf'](params)
+                print(f'mu: {this_mu}')
+                print(f'sigma: {this_sigma}')
+                print(f'logpdf: {this_logprior}')
+                print(f'fval: {fval}')
+            
+            if np.isinf(fval): 
+                fval = 10000000
+            if fval is None:
+                fval = 10000000
+            return fval
+    
+    # output for fitting 
+    elif output == 'all': 
+        subj_dict = {'params'     : params,
+                     'reg_list'   : reg_list,
+                     'lam_method' : lam_method,
+                     'mood_est'   : mood_est,
+                     'mood_obs'   : mood_obs,
+                     'mood_resid' : mood_residuals,
+                     'rss'        : rss,
+                     'bic'        : K * np.log(len(mood_residuals)) - 2*np.log((rss/len(mood_residuals))),
+                     'aic'        : 2*K + n*np.log(rss/len(mood_residuals))
+                     } #https://stats.stackexchange.com/questions/338501/calculating-the-aicc-and-bic-with-rss-instead-of-likelihood
+
+        return subj_dict
+
+
 
 
 #### option to use minimize function to minimize rss instead of least_sq optimization 
