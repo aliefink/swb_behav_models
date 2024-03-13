@@ -85,8 +85,8 @@ def fit_swb(params,df,n_regs,reg_list,lam_method='exp',output='rss'):
     # actual mood obs
     mood_obs = np.array(df['z_rate'])
     #compute the vector of residuals
-    mood_residuals = mood_obs - mood_est
-    rss = np.sum(mood_residuals**2)
+    mood_residuals = mood_obs - mood_est     # sse = np.sum((m.predict(x) - y) ** 2, axis=0) / float(x.shape[0] - x.shape[1])
+    rss = np.sum(mood_residuals**2) 
 
     if output == 'rss':
         return rss
@@ -228,7 +228,7 @@ def fit_swb_pyEM(params,df,reg_list,lam_method='exp',prior=None, output='npl'):
 #### option to use minimize function to minimize rss instead of least_sq optimization 
 
 
-def min_rss_swb(subj_df, n_regs, reg_list, param_inits,lam_method='exp'):
+def min_rss_swb(subj_df, n_regs, reg_list, param_inits):
     
     # INPUTS:
     # model_df:     model data for subj 
@@ -238,47 +238,55 @@ def min_rss_swb(subj_df, n_regs, reg_list, param_inits,lam_method='exp'):
     # param_inits:  list of initial parameter value combinations to iterate through - fn will run through optimization for each item in param_guesses [(nparams)(nparams)]
     # lam_method:   calculation of lam param ['exp','linear','none']
 
-    #initialize best result & initial rss value to minimize 
-    best_result = []
-    rss_optim   = np.inf
 
     # calculate bounds for each param init 
     n_beta_bounds = n_regs+1
-    # remove lam from bounds if none 
-    if lam_method == 'none': #remove lam from estimation + bounds input
-        bounds = tuple([(-100,100)]*n_beta_bounds)
-    else: 
-        bounds = tuple([(0.001,1)]+[(-100,100)]*n_beta_bounds)
+    # # remove lam from bounds if none 
+    # if lam_method == 'none': #remove lam from estimation + bounds input
+    #     bounds = tuple([(-100,100)]*n_beta_bounds)
+    # else: 
+    #     bounds = tuple([(0.001,1)]+[(-10,10)]*n_beta_bounds)
+    
+    bounds = tuple([(0.001,1)]+[(-10,10)]*n_beta_bounds)
+    
+    #initialize best result & initial rss value to minimize 
+    best_result = []
+    rss_optim   = np.inf 
 
     for params in param_inits:
 
-        if lam_method == 'none': #remove lam from estimation + bounds input
-            params = params[1:]
+        # if lam_method == 'none': #remove lam from estimation + bounds input
+        #     params = params[1:]
+        # else:
+        #     params = params
 
         #run minimization for each param combo in param_inits
         result = minimize(fit_swb, # objective function
                     params,
-                    args=(subj_df,n_regs,reg_list,lam_method), #reg_list should be in long form (3 str per n reg)
+                    args=(subj_df,n_regs,reg_list), #reg_list should be in long form (3 str per n reg)
                     bounds=bounds) # arguments #method='L-BFGS-B'
         
         #extract rss from result output 
-        rss = result.fun #residuals output from best model
+        rss = result.fun #residuals output from model
+        print(rss)
         if rss < rss_optim: #goal to minimize cost function, find params that give lowest possible rss
             rss_optim = rss                
-            best_result = result 
+            best_result = result
+            best_params = best_result.x 
     
     if rss_optim == np.inf:
-        print('No solution for this subject')
-        return None
+        print(f'No solution for this subject rss={rss} optim={rss_optim}')
+        fit_dict = {}
+        fit_dict['result'] = result
+        return fit_dict
     
     else:
-        best_params = best_result.x
         #fit model with optim params
         fit_dict = {}
         fit_dict['best_result'] = best_result
-        fit_dict['subj_dict']   = fit_swb(best_params,subj_df,n_regs,reg_list,lam_method,output='all') #run fit function to get all outputs (better than 2 separate fns)
+        fit_dict['subj_dict']   = fit_swb(best_params,subj_df,n_regs,reg_list,lam_method='exp',output='all') #run fit function to get all outputs (better than 2 separate fns)
 
-    return fit_dict
+        return fit_dict
 
 
 ############ prospect theory models ##############
@@ -1530,7 +1538,7 @@ def get_pt_task_data_mle_emmap(subj_ids,behav_dir,pt_mle_fits,pt_emmap_fits):
         #save new task df as pt_task_data
         subj_df.to_csv(f'{behav_dir}{subj_id}_pt_task_data')
 
-        return pt_task_dfs
+    return pt_task_dfs
 
 
 def get_pt_utils(task): #updated to be correct calculations
