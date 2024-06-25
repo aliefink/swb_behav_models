@@ -8,6 +8,8 @@ from joblib import Parallel, delayed
 import random
 from sklearn.metrics import r2_score
 import random
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
 
 #contains:
     # fit_swb
@@ -39,6 +41,108 @@ import random
 
 
 #fit swb glm function
+def fit_swb_glm(params,df,reg_list,gamma_type='exp',output='negll'):
+    # compute K for BIC/AIC equations
+    K = len(params)
+
+    # first num in params is forgetting factor
+    if gamma_type == 'exp':
+        gamma_vars = [1.0,params[0],params[0]**2]
+    elif gamma_type == 'linear':
+        gamma_vars = [1.0,params[0],params[0]*2] # gam x 2 not gam ^2 for linear 
+    else: 
+        gamma_vars = [1.0,1.0,1.0]
+        K = K-1 # update K to drop gamma in param count
+
+    # second element in params list is glm intercept 
+    b0 = params[1]
+    # rest of elements in params are beta weight estimates for regressors (1 value/reg)
+    beta_vars = params[2:] 
+
+    pred_mood = 0
+
+    for b_ix,b_est in enumerate(beta_vars):
+        reg_id = reg_list[b_ix]
+        reg_t1 = reg_id + '_t1'
+        reg_t2 = reg_id + '_t2'
+        reg_t3 = reg_id + '_t3'
+        pred_mood += b0 + (b_est*df[reg_t1]) + (gamma_vars[1]*b_est*df[reg_t2]) + (gamma_vars[2]*(b_est*df[reg_t3]))
+        # pred_mood += b0 + (b_est*df[reg_t1]) + (params[0]*b_est*df[reg_t2]) + (params[0]**2*(b_est*df[reg_t3]))
+
+    
+    ### 
+    obs_mood = df.mood
+    resid_mood = np.subtract(obs_mood,pred_mood)
+    resid_std = np.std(resid_mood)
+    ### compute negative log likelihood instead of rss using gaussian pdf fn 
+    negll = -np.sum(scipy.stats.norm.logpdf(obs_mood,loc=pred_mood,scale=resid_std))
+    rss = np.sum(resid_mood**2)
+    
+    if output == 'negll':
+    
+        return negll 
+
+    elif output == 'rss':
+        return rss
+
+    elif output == 'all':
+        subj_dict = {'params'     : params,
+                     'reg_list'   : reg_list,
+                     'pred_mood'  : pred_mood,
+                     'negll'      : negll,
+                     'bic'        : K*len(df) + 2*negll}
+
+        return subj_dict
+def min_negll_glm(func_obj, param_values, df, reg_list,param_bounds):
+    # minimize negll via MLE via gradient descent
+
+    result = minimize(func_obj, 
+                      param_values, 
+                      (df,reg_list),
+                      bounds=param_bounds)
+    return result
+ 
+def parallel_glm_fit(min_fn, fit_fn,param_combo_guesses,param_bounds,subj_df,reg_list,n_jobs=-2):
+    '''
+    Maximum likelihood estimation with parallel processing 
+
+    Inputs:
+        - min_fn: minimization function 
+        - fit_fn: model fitting function (should return negll only)
+        - param_combo_guesses: grid of initial param values for parallel min_fn runs 
+        - param_bounds: min/max bounds for params in this format: (0,5),(0,5),(0,10)
+        - subj_df: pandas df of subj task data
+    
+    Returns:
+        - fit_dict: output of fit_fn
+
+    '''
+
+    
+    ##### Minimize negll via parallel mle
+
+    # Parallel fn :
+        # Basic syntax Parallel(n_jobs,verbose) ( delayed(optim_fn)(optim_fun inputs) loop for parallel fn inputs )
+        # requires Parallel & delayed from joblib
+        # n_jobs=-2 - num cpus used, -1 for all, -2 for all but one, +num for specific num
+        # verbose default is none, higher than 10 will give all
+        # delayed() = hold memory for function to run in parallel
+        # optim_fn = minimization fn
+        # ()() = inputs for optim_fn in delay - negll fn, params, data, bounds
+        # (()()____): iterations of initial param values 
+    
+    results = Parallel(n_jobs=n_jobs, verbose=5)(delayed(min_fn)(fit_fn, param_values, (subj_df),reg_list, param_bounds) for param_values in param_combo_guesses)
+
+    # determine optimal parameter combination from negll
+    fit_dict = {}
+    best_result = min(results, key=lambda x: x.fun) # use lambda function to get negll from each run in results (lambda args: expression) 
+    param_fits = best_result.x
+    fit_dict['best_result'] = best_result
+    # run fit_fn with param_fits get best model fit info ### implement this with GLMs!
+    fit_dict['subj_dict'] = fit_fn(param_fits, subj_df, reg_list,output='all')
+    
+    
+    return fit_dict
 
 def fit_swb(params,df,n_regs,reg_list,lam_method='exp',output='rss'):
 
@@ -691,7 +795,7 @@ def negll_base_pt_pyEM(params, subj_df, prior=None, output='npl'):
                      'WeightedLow' : w_low,
                      'WeightedSafe': w_safe,
                      'negll'       : negll,
-                     'bic'         : len(params) * np.log(150) + 2*negll}
+                     'bic'         : len(subj_df) * np.log(150) + 2*negll}
         
         return subj_dict
 
@@ -1771,3 +1875,30 @@ def get_glm_data_single_subj(subj_id,behav_dir,model_data_vars):
             model_data_dict[reg_t1_col].append(task_df[reg][t1])
     
     return model_data_dict
+
+def vif_scores(df, regressor_vars):
+    
+    cov_data_dict = {f'{reg}':[] for reg in regressor_vars}
+    
+    # check if data is categorical
+    for reg in regressor_vars: 
+        if pd.api.types.is_numeric_dtype(df[reg]):
+            cov_data_dict[reg] = df[reg]
+        else: 
+            # factorize categorical data into numeric dummy variables 
+            cov_data_dict[reg] = pd.factorize(df[reg])[0]
+    
+    vif_df = pd.DataFrame(cov_data_dict)
+
+
+    vif_df = vif_df.astype(float)
+    vif_df = vif_df.dropna()
+
+
+    vif_data = pd.DataFrame() 
+    vif_data["feature"] = vif_df.columns 
+
+    # calculating VIF for each feature 
+    vif_data["VIF"] = [variance_inflation_factor(vif_df.values, i) 
+                              for i in range(len(vif_df.columns))] 
+    return vif_data
