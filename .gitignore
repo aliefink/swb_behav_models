@@ -10,3 +10,5 @@ data/model_input_data_06162023
 data/model_input_data_06192023
 Scripts/pyEM/
 .DS_Store
+.DS_Store
+scripts/.DS_Store
