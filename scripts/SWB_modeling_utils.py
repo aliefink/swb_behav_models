@@ -5,11 +5,10 @@ import scipy
 from scipy.stats import norm
 from scipy.optimize import least_squares, minimize
 from joblib import Parallel, delayed
-import random
 from sklearn.metrics import r2_score
 import random
 from statsmodels.stats.outliers_influence import variance_inflation_factor
-
+from numpy.linalg import vecdot
 
 #contains:
     # fit_swb
@@ -39,47 +38,42 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 ############### SWB GLMS ################
 
-
 #fit swb glm function
-def fit_swb_glm(params,df,reg_list,gamma_type='exp',output='negll'):
-    # compute K for BIC/AIC equations
-    K = len(params)
-
-    # first num in params is forgetting factor
-    if gamma_type == 'exp':
-        gamma_vars = [1.0,params[0],params[0]**2]
-    elif gamma_type == 'linear':
-        gamma_vars = [1.0,params[0],params[0]*2] # gam x 2 not gam ^2 for linear 
+def fit_swb_glm(params,df,mood_var='norm_mood',g_type='exp',output='negll'):
+    # params is 1d array length K (gamma, intercept, coefficient/var)
+    K     = len(params) # compute K for BIC/AIC equations
+    g     = params[0] # temporal decay  
+    b0    = params[1] # glm intercept
+    b_vec = params[2:] # vector of beta coefficient estimates for each predictor category
+    
+    if g_type == 'exp':
+        g_vec = np.array([1.0,g,g**2]) # exponential decay
+    elif g_type == 'linear':
+        g_vec = np.array([1.0,g,g*2]) # gam x 2 not gam ^2 for linear
     else: 
-        gamma_vars = [1.0,1.0,1.0]
+        g_vec = np.array([1.0,1.0,1.0]) # no gam exponent
         K = K-1 # update K to drop gamma in param count
 
-    # second element in params list is glm intercept 
-    b0 = params[1]
-    # rest of elements in params are beta weight estimates for regressors (1 value/reg)
-    beta_vars = params[2:] 
-
-    pred_mood = 0
-
-    for b_ix,b_est in enumerate(beta_vars):
-        reg_id = reg_list[b_ix]
-        reg_t1 = reg_id + '_t1'
-        reg_t2 = reg_id + '_t2'
-        reg_t3 = reg_id + '_t3'
-        pred_mood += b0 + (b_est*df[reg_t1]) + (gamma_vars[1]*b_est*df[reg_t2]) + (gamma_vars[2]*(b_est*df[reg_t3]))
-        # pred_mood += b0 + (b_est*df[reg_t1]) + (params[0]*b_est*df[reg_t2]) + (params[0]**2*(b_est*df[reg_t3]))
-
-    
-    ### 
-    obs_mood = df.mood
+    # make 1d vector of model coefficients (beta, beta*gamma, beta*gamma^2 for every reg)
+    coeff_vec = np.hstack([np.array([b,b*g_vec[1],b*g_vec[2]]) for b in b_vec])
+    # predictor data - array nratings x npredictors (x3 for t1,t2,t3) 
+    X = df[df.columns[df.columns != mood_var]].to_numpy()
+    # dot product between data matrix X [ntrials x nregressors] and betas matrix [nregressors]
+    mood_vecdot = np.vecdot(X, coeff_vec)
+    # add intercept to mood vec estimate
+    pred_mood = mood_vecdot + b0
+    # observed mood ratings  
+    obs_mood = df[mood_var]
+    # model residuals - difference in observed y, predicted y 
     resid_mood = np.subtract(obs_mood,pred_mood)
-    resid_std = np.std(resid_mood)
-    ### compute negative log likelihood instead of rss using gaussian pdf fn 
-    negll = -np.sum(scipy.stats.norm.logpdf(obs_mood,loc=pred_mood,scale=resid_std))
+    # residual sum of squares 
     rss = np.sum(resid_mood**2)
-    
-    if output == 'negll':
-    
+    # std of residuals for negll equation
+    resid_std = np.std(resid_mood) 
+    # negative log likelihood with gaussian pdf fn scaled by std of residuals  
+    negll = -np.sum(scipy.stats.norm.logpdf(obs_mood,loc=pred_mood,scale=resid_std))
+
+    if output == 'negll':    
         return negll 
 
     elif output == 'rss':
@@ -87,22 +81,24 @@ def fit_swb_glm(params,df,reg_list,gamma_type='exp',output='negll'):
 
     elif output == 'all':
         subj_dict = {'params'     : params,
-                     'reg_list'   : reg_list,
+                     'reg_list'   : list(df.columns[df.columns != mood_var]),
                      'pred_mood'  : pred_mood,
                      'negll'      : negll,
-                     'bic'        : K*len(df) + 2*negll}
+                     'bic'        : K*np.log(len(pred_mood)) + 2*negll}
 
         return subj_dict
-def min_negll_glm(func_obj, param_values, df, reg_list,param_bounds):
+
+
+def min_negll_glm(func_obj, param_values, df, param_bounds):
     # minimize negll via MLE via gradient descent
 
     result = minimize(func_obj, 
                       param_values, 
-                      (df,reg_list),
+                      (df),
                       bounds=param_bounds)
     return result
  
-def parallel_glm_fit(min_fn, fit_fn,param_combo_guesses,param_bounds,subj_df,reg_list,n_jobs=-2):
+def parallel_glm_fit(min_fn, fit_fn,param_combo_guesses,param_bounds,subj_df,n_jobs=-1):
     '''
     Maximum likelihood estimation with parallel processing 
 
@@ -131,7 +127,8 @@ def parallel_glm_fit(min_fn, fit_fn,param_combo_guesses,param_bounds,subj_df,reg
         # ()() = inputs for optim_fn in delay - negll fn, params, data, bounds
         # (()()____): iterations of initial param values 
     
-    results = Parallel(n_jobs=n_jobs, verbose=5)(delayed(min_fn)(fit_fn, param_values, (subj_df),reg_list, param_bounds) for param_values in param_combo_guesses)
+    results = Parallel(n_jobs=n_jobs, verbose=5)(delayed(min_fn)(fit_fn, param_values, (subj_df), param_bounds) 
+                                                 for param_values in param_combo_guesses)
 
     # determine optimal parameter combination from negll
     fit_dict = {}
@@ -139,7 +136,7 @@ def parallel_glm_fit(min_fn, fit_fn,param_combo_guesses,param_bounds,subj_df,reg
     param_fits = best_result.x
     fit_dict['best_result'] = best_result
     # run fit_fn with param_fits get best model fit info ### implement this with GLMs!
-    fit_dict['subj_dict'] = fit_fn(param_fits, subj_df, reg_list,output='all')
+    fit_dict['subj_dict'] = fit_fn(param_fits, subj_df,output='all')
     
     
     return fit_dict
