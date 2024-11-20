@@ -18,14 +18,14 @@ class swb_subj_behav(object):
         - **kwargs       : (optional)
         '''
 
-        self.subj_id   = subj_id  # single electrode tfr data
+        self.subj_id   = subj_id 
         self.behav_dir = behav_dir
-        self.output    = output # channel name for single electrode tfr data
+        self.output    = output 
         self.save_dir  = save_dir # single subject behav data
 
     def preprocess_behav(self):
+        
         task_df = self.compute_task_vars(self.format_task_df(self.load_behav_file('task')))
-
         mood_df = self.format_mood_df(self.load_behav_file('Rate'))
         
         if self.output == 'all': #return task + mood dfs
@@ -33,10 +33,12 @@ class swb_subj_behav(object):
                 task_df.to_csv(f'{self.save_dir}{self.subj_id}_task_df.csv',index=False)
                 mood_df.to_csv(f'{self.save_dir}{self.subj_id}_mood_df.csv',index=False)
             return task_df,mood_df
+        
         elif self.output == 'task':  #return task df only
             if self.save_dir: # save file if defined
                 task_df.to_csv(f'{self.save_dir}{self.subj_id}_task_df.csv',index=False)
             return task_df
+        
         elif self.output == 'mood':  #return mood df only 
             if self.save_dir: # save file if defined
                 mood_df.to_csv(f'{self.save_dir}{self.subj_id}_mood_df.csv',index=False)
@@ -54,6 +56,7 @@ class swb_subj_behav(object):
 
         if data_type =='task':
             file = [file for file in raw_data_files if 'Rate' not in file if 'BDI' not in file if 'BAI' not in file if 'DS' not in file][0]
+            
         else:
             file = [file for file in raw_data_files if data_type in file][0]
 
@@ -66,12 +69,14 @@ class swb_subj_behav(object):
             mood_df = mood_df.rename(columns={'Trial':'Rating','Type':'RatingOnset','Rating':'RT'})
         
         mood_df = mood_df.drop(mood_df.tail(2).index) #remove empty rows
+        
         # correct epochs check 
         if [int(mood_df.Round[mood_df.first_valid_index()]), int(mood_df.Round[mood_df.last_valid_index()])] != round_range:
             start_drops = np.arange(mood_df.first_valid_index(),mood_df.index[mood_df.Round.astype(int) == round_range[0]].values.astype(int)[0])
             end_drops   = np.arange(mood_df.index[mood_df.Round.astype(int) == round_range[1]].values.astype(int)[0]+1,mood_df.last_valid_index()+1)
             all_drops   = list(start_drops)+list(end_drops)
             mood_df = mood_df.drop(mood_df.loc[all_drops].index).reset_index(drop=True)
+        
         # add bdi info mood_df
         mood_df['bdi'] = self.get_psych_score('BDI')
         mood_df['subj_id'] = self.subj_id
@@ -91,10 +96,19 @@ class swb_subj_behav(object):
         mood_df['epoch_t1_idx'] = mood_df.epoch-1
         mood_df['epoch_t2_idx'] = mood_df.epoch-2
         mood_df['epoch_t3_idx'] = mood_df.epoch-3
-    
+
+
+        # mask for which mood trials to remove later!! 
+        mood_df['keep_mood'] = 'keep' # initialize all trials as keep
+        mood_df.loc[mood_df.RT<0.3,'keep_mood'] = 'drop'
+        
+        mood_df.loc[mood_df.keep_mood=='drop','Rating'] = np.nan
+        mood_df.loc[mood_df.keep_mood=='drop','RT']     = np.nan
+
         return mood_df
     
     def format_task_df(self,task_df,keep_cols=None,round_range=[1,150]):
+        
         task_df = task_df.drop(task_df.tail(2).index) #remove empty rows
         task_df = task_df.rename(columns={f'{col}':('').join(col.split(' ')) for col in task_df.columns})
         
@@ -113,9 +127,8 @@ class swb_subj_behav(object):
         if keep_cols:
             task_df = task_df[keep_cols]
         else: 
-            task_df = task_df[['subj_id','bdi','bdi_thresh','Round','RT','TrialOnset', 'ChoiceOnset','DecisionOnset', 'FeedbackOnset','ChoicePos','TrialType','SafeBet',
-                            'LowBet', 'HighBet','GambleChoice', 'Outcome','Profit', 'TotalProfit']]
-            
+            task_df = task_df[['subj_id', 'bdi', 'bdi_thresh', 'Round', 'TrialNum', 'RT','TrialOnset', 'ChoiceOnset', 'DecisionOnset', 'FeedbackOnset', 'TrialType', 'SafeBet', 'LowBet', 'HighBet','GambleChoice', 'Outcome', 'Profit', 'TotalProfit']]
+        
         return task_df
     
     def get_psych_score(self,psych_type):
@@ -125,42 +138,61 @@ class swb_subj_behav(object):
         return np.max(psych_df.rename(columns={f'{col}':col.split(' ')[-1] for col in psych_df.columns}).Score.values)
     
     def compute_task_vars(self,task_df):
+        
         # add new vars to dataframe 
         task_df['epoch']    = task_df.Round.astype(int)-1
+        task_df['CpeOnset'] = task_df.DecisionOnset + 2.0
         task_df['logRT']    = np.log(task_df.RT)
         task_df['GambleEV'] = (task_df.LowBet + task_df.HighBet)/2
-        task_df['TrialEV']  = (task_df.GambleEV+task_df.SafeBet)/2
-        task_df['CR']       = [row['SafeBet'] if row['GambleChoice']=='safe' else 0.0 for ix,row in task_df.iterrows()]
-        task_df['choiceEV'] = [row['GambleEV'] if row['GambleChoice']=='gamble' else 0.0 for ix,row in task_df.iterrows()]
+        task_df['TrialEV']  = (task_df.HighBet+task_df.LowBet+task_df.SafeBet)/3
+        task_df['CR']       = [row['SafeBet'] if row['GambleChoice']=='safe' else np.nan for ix,row in task_df.iterrows()]
+        task_df['choiceEV'] = [row['GambleEV'] if row['GambleChoice']=='gamble' else np.nan for ix,row in task_df.iterrows()]
         task_df['rpe']      = [row.Profit - row.GambleEV if row['GambleChoice']=='gamble' else 0.0 for ix,row in task_df.iterrows()]
-        # start counterfactual computations
+        
+        ### start counterfactual computations
         cf_id_dict = {'gamble_good':'SafeBet','gamble_bad':'SafeBet','safe_good':'LowBet','safe_bad':'HighBet'}
-        max_cf_id_dict = {'gamble_good':'LowBet','gamble_bad':'HighBet','safe_good':'LowBet','safe_bad':'HighBet'}
+        
         # use dict info to find correct cf value
-        task_df['res_type'] = list(map(lambda x,y: '_'.join([x,y]), task_df.GambleChoice.astype(str),task_df.Outcome.astype(str)))
+        task_df['res_type'] = list(map(lambda x,y: '_'.join([x,y]), task_df.GambleChoice.astype(str), task_df.Outcome.astype(str)))
         task_df['res_type'] = [res if res in list(cf_id_dict.keys()) else 'drop' for res in task_df.res_type]
-        task_df['cf']       = [row[cf_id_dict[row.res_type]] if row.res_type in list(cf_id_dict.keys()) else 0.0 for ix,row in task_df.iterrows()]
-        task_df['max_cf']   = [row[max_cf_id_dict[row.res_type]] if row.res_type in list(max_cf_id_dict.keys()) else 0.0 for ix,row in task_df.iterrows()]
+        task_df['cf']       = [row[cf_id_dict[row.res_type]] if row.res_type in list(cf_id_dict.keys()) else np.nan for ix,row in task_df.iterrows()]
         task_df['cpe']      = task_df['Profit'] - task_df['cf']
-        task_df['max_cpe']  = task_df['Profit'] - task_df['max_cf']
 
         # compute t1 data and add to df  
-        t1_var_list = list(task_df.columns.drop(['subj_id','bdi','bdi_thresh','TrialOnset','ChoiceOnset','DecisionOnset','FeedbackOnset']))
+        t1_var_list = list(task_df.columns.drop(['subj_id', 'bdi', 'bdi_thresh', 'TrialOnset', 'ChoiceOnset', 'DecisionOnset', 'FeedbackOnset','CpeOnset']))
+        
         for var in t1_var_list:
             var_t1 = '_'.join([var,'t1'])
             t1_data = task_df[var].tolist()[1:]+[np.nan]
             task_df[var_t1] = t1_data
-            
+      
         # mask for which trials to remove later!! 
-        task_df['keep_epoch'] = ['keep' if cpe != 0.0 else 'drop' for cpe in task_df.cpe]
-        task_df[task_df.RT < 0.3][['keep_epoch']] = 'drop'
-        task_df[(task_df.Outcome!='good')&(task_df.Outcome!='bad')][['keep_epoch']] = 'drop'
-        task_df[(task_df.GambleChoice!='gamble')&(task_df.GambleChoice!='safe')][['keep_epoch']] = 'drop'
+        task_df['keep_epoch'] = 'keep' # initialize all trials as keep
+        task_df.loc[task_df.cpe.isnull(), 'keep_epoch'] = "drop"
+        task_df.loc[task_df.RT< 0.3, 'keep_epoch'] = "drop"
+        task_df.loc[(task_df.Outcome !='good')&(task_df.Outcome !='bad'), 'keep_epoch'] = "drop"
+        task_df.loc[(task_df.GambleChoice !='gamble')&(task_df.GambleChoice !='safe'), 'keep_epoch'] = "drop"
+        task_df.loc[task_df.Round=='76', 'keep_epoch'] = "drop"
+        task_df.loc[task_df.res_type=='drop', 'keep_epoch'] = "drop"        
+        
+        task_df.loc[task_df.keep_epoch=='drop','cpe']         = np.nan
+        task_df.loc[task_df.keep_epoch=='drop','rpe']         = np.nan
+        task_df.loc[task_df.keep_epoch=='drop','Profit']      = np.nan
+        task_df.loc[task_df.keep_epoch=='drop','TotalProfit'] = np.nan
 
         # mask for which t1 trials to remove later!! 
-        task_df['keep_epoch_t1'] = ['keep' if cpe_t1 != 0.0 else 'drop' for cpe_t1 in task_df.cpe_t1]
-        task_df[task_df.RT_t1 < 0.3][['keep_epoch_t1']] = 'drop'
-        task_df[(task_df.Outcome_t1 !='good')&(task_df.Outcome_t1 !='bad')][['keep_epoch_t1']] = 'drop'
-        task_df[(task_df.GambleChoice_t1 !='gamble')&(task_df.GambleChoice_t1 !='safe')][['keep_epoch_t1']] = 'drop'
+        task_df['keep_epoch_t1'] = 'keep' # initialize all t1 trials as keep
+        task_df.loc[task_df.cpe_t1.isnull(), 'keep_epoch_t1'] = "drop"
+        task_df.loc[task_df.RT_t1< 0.3, 'keep_epoch_t1'] = "drop"
+        task_df.loc[(task_df.Outcome_t1 !='good')&(task_df.Outcome_t1 !='bad'), 'keep_epoch_t1'] = "drop"
+        task_df.loc[(task_df.GambleChoice_t1 !='gamble')&(task_df.GambleChoice_t1 !='safe'), 'keep_epoch_t1'] = "drop"
+        task_df.loc[task_df.Round_t1=='76', 'keep_epoch_t1'] = "drop"
+        task_df.loc[task_df.res_type_t1=='drop', 'keep_epoch_t1'] = "drop"
 
+        task_df.loc[task_df.keep_epoch_t1=='drop','cpe_t1']         = np.nan
+        task_df.loc[task_df.keep_epoch_t1=='drop','rpe_t1']         = np.nan
+        task_df.loc[task_df.keep_epoch_t1=='drop','Profit_t1']      = np.nan
+        task_df.loc[task_df.keep_epoch_t1=='drop','TotalProfit_t1'] = np.nan
+        
+        
         return task_df
